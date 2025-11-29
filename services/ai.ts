@@ -2,11 +2,11 @@ import { Settings, Message, Attachment } from '../types';
 
 export const AI_MODELS = {
     gemini: [
-        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
-        { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
-        { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash' },
-        { id: 'gemini-2.0-flash-lite-preview-02-05', name: 'Gemini 2.0 Flash Lite' },
         { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+        { id: 'gemini-2.0-flash-lite-preview', name: 'Gemini 2.0 Flash Lite' },
+        { id: 'gemini-3-pro-preview', name: 'Gemini 3 pro' },
     ],
     openrouter: [
         { id: 'google/gemma-2-9b-it:free', name: 'Gemma 2 9B (مجاني)' },
