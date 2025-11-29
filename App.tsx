@@ -17,7 +17,7 @@ const defaultSettings: Settings = {
     customPrompt: '',
     apiKeyRetryStrategy: 'sequential',
     fontSize: 18,
-    thinkingBudget: 0 // الافتراضي 0 (معطل)
+    thinkingBudget: 1024 // الافتراضي قيمة معقولة ليستخدمها الزر عند التفعيل
 };
 
 const App: React.FC = () => {
@@ -203,10 +203,12 @@ const App: React.FC = () => {
 
             let streamedContent = '';
             
-            // إعدادات وقت التشغيل: إذا تم طلب التفكير الإجباري، نرفع الميزانية إلى 4096 لضمان التفكير العميق
+            // المنطق الجديد للميزانية:
+            // إذا كان الزر مفعلاً (forceThink): نستخدم القيمة الموجودة في الإعدادات.
+            // إذا كان الزر غير مفعل: نرسل 0 (لتعطيل التفكير تماماً).
             const runSettings = {
                 ...settings,
-                thinkingBudget: forceThink ? Math.max(settings.thinkingBudget || 0, 4096) : settings.thinkingBudget
+                thinkingBudget: forceThink ? settings.thinkingBudget : 0
             };
             
             await streamResponse(history, runSettings, (chunk) => {
@@ -268,12 +270,12 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className="relative flex flex-col h-[100dvh] w-full bg-zeus-base text-white font-sans overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" dir="rtl">
+        <div className="relative flex flex-col h-full w-full bg-zeus-base text-white font-sans overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" dir="rtl">
             
             {/* تراكب الموبايل */}
             {isSidebarOpen && (
                 <div 
-                    className="fixed inset-0 bg-black/50 z-20 md:hidden backdrop-blur-sm"
+                    className="absolute inset-0 bg-black/50 z-20 md:hidden backdrop-blur-sm"
                     onClick={() => setIsSidebarOpen(false)}
                 />
             )}
@@ -281,7 +283,7 @@ const App: React.FC = () => {
             <div className="flex flex-1 overflow-hidden relative">
                 {/* القائمة الجانبية */}
                 <div className={`
-                    fixed md:relative z-30 h-full transition-all duration-300 ease-in-out
+                    absolute md:relative z-30 h-full transition-all duration-300 ease-in-out
                     ${isSidebarOpen ? 'translate-x-0 w-80' : 'translate-x-full md:translate-x-0 md:w-0 md:opacity-0 md:overflow-hidden'}
                     right-0 border-l border-white/10 bg-zeus-surface shadow-xl
                     pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0

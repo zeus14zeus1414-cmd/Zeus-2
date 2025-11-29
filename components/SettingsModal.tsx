@@ -326,24 +326,24 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                                         ميزانية التفكير (Thinking Budget)
                                     </span>
                                     <span className={`text-xs px-2 py-1 rounded border ${localSettings.thinkingBudget > 0 ? 'bg-zeus-gold/10 text-zeus-gold border-zeus-gold/30' : 'bg-gray-800 text-gray-500 border-gray-700'}`}>
-                                        {localSettings.thinkingBudget === 0 ? 'معطل' : `${localSettings.thinkingBudget} Tokens`}
+                                        {localSettings.thinkingBudget} Tokens
                                     </span>
                                 </label>
                                 <p className="text-xs text-gray-500 mb-3">
-                                    حدد عدد التوكنز المخصصة لعملية التفكير قبل الإجابة. كلما زاد الرقم، زاد عمق التفكير (يدعم نماذج محددة مثل Gemini 3 Pro).
+                                    يحدد هذا الرقم عمق التفكير عند تفعيل زر "المخ" (Deep Think) في المحادثة. كلما زاد الرقم، زاد عمق التفكير.
                                 </p>
                                 <input 
-                                    type="range" min="0" max="16384" step="1024"
+                                    type="range" min="0" max="64000" step="1024"
                                     value={localSettings.thinkingBudget || 0}
                                     onChange={(e) => setLocalSettings({...localSettings, thinkingBudget: parseInt(e.target.value)})}
                                     className="w-full accent-zeus-gold h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                 />
                                 <div className="flex justify-between text-[10px] text-gray-600 font-mono mt-1">
-                                    <span>OFF</span>
-                                    <span>2048</span>
-                                    <span>4096</span>
-                                    <span>8192</span>
+                                    <span>0</span>
                                     <span>16k</span>
+                                    <span>32k</span>
+                                    <span>48k</span>
+                                    <span>64k</span>
                                 </div>
                             </div>
                             
