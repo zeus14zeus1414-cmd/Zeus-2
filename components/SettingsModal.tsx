@@ -12,6 +12,10 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
     const [localSettings, setLocalSettings] = useState<Settings>(settings);
     const [activeTab, setActiveTab] = useState<'general' | 'keys' | 'custom_providers' | 'custom_models'>('general');
     const [isClosing, setIsClosing] = useState(false);
+    
+    // حالة للإضافة المتعددة للمفاتيح
+    const [bulkAddTarget, setBulkAddTarget] = useState<string | null>(null);
+    const [bulkText, setBulkText] = useState('');
 
     const handleClose = () => {
         setIsClosing(true);
@@ -25,19 +29,64 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
         handleClose();
     };
 
-    const addKey = (provider: 'gemini' | 'openrouter') => {
-        const keyType = provider === 'gemini' ? 'geminiApiKeys' : 'openrouterApiKeys';
-        setLocalSettings(prev => ({
-            ...prev,
-            [keyType]: [...prev[keyType], { key: '', status: 'active' }]
-        }));
+    // --- Unified Key Management Logic ---
+
+    // الحصول على المفاتيح بناءً على معرف المزود
+    const getProviderKeys = (providerId: string): ApiKey[] => {
+        if (providerId === 'gemini') return localSettings.geminiApiKeys;
+        if (providerId === 'openrouter') return localSettings.openrouterApiKeys;
+        const custom = localSettings.customProviders.find(p => p.id === providerId);
+        return custom ? custom.apiKeys : [];
     };
 
-    const updateKey = (provider: 'gemini' | 'openrouter', index: number, val: string) => {
-        const keyType = provider === 'gemini' ? 'geminiApiKeys' : 'openrouterApiKeys';
-        const newKeys = [...localSettings[keyType]];
-        newKeys[index].key = val;
-        setLocalSettings(prev => ({ ...prev, [keyType]: newKeys }));
+    // تحديث المفاتيح لمزود معين
+    const updateProviderKeys = (providerId: string, newKeys: ApiKey[]) => {
+        if (providerId === 'gemini') {
+            setLocalSettings(prev => ({ ...prev, geminiApiKeys: newKeys }));
+        } else if (providerId === 'openrouter') {
+            setLocalSettings(prev => ({ ...prev, openrouterApiKeys: newKeys }));
+        } else {
+            setLocalSettings(prev => ({
+                ...prev,
+                customProviders: prev.customProviders.map(p => 
+                    p.id === providerId ? { ...p, apiKeys: newKeys } : p
+                )
+            }));
+        }
+    };
+
+    const addSingleKey = (providerId: string) => {
+        const currentKeys = getProviderKeys(providerId);
+        updateProviderKeys(providerId, [...currentKeys, { key: '', status: 'active' }]);
+    };
+
+    const handleBulkAddSubmit = (providerId: string) => {
+        if (!bulkText.trim()) {
+            setBulkAddTarget(null);
+            return;
+        }
+
+        // تقسيم النص إلى أسطر وتنظيف الفراغات
+        const newKeysRaw = bulkText.split('\n').map(k => k.trim()).filter(k => k.length > 0);
+        const newApiKeys: ApiKey[] = newKeysRaw.map(k => ({ key: k, status: 'active' }));
+        
+        const currentKeys = getProviderKeys(providerId);
+        updateProviderKeys(providerId, [...currentKeys, ...newApiKeys]);
+        
+        setBulkText('');
+        setBulkAddTarget(null);
+    };
+
+    const deleteKey = (providerId: string, index: number) => {
+        const currentKeys = [...getProviderKeys(providerId)];
+        currentKeys.splice(index, 1);
+        updateProviderKeys(providerId, currentKeys);
+    };
+
+    const updateKeyValue = (providerId: string, index: number, value: string) => {
+        const currentKeys = [...getProviderKeys(providerId)];
+        currentKeys[index].key = value;
+        updateProviderKeys(providerId, currentKeys);
     };
 
     // --- Custom Provider Logic ---
@@ -58,12 +107,6 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
     const updateCustomProvider = (index: number, field: keyof CustomProvider, value: any) => {
         const updated = [...localSettings.customProviders];
         updated[index] = { ...updated[index], [field]: value };
-        setLocalSettings(prev => ({ ...prev, customProviders: updated }));
-    };
-
-    const updateCustomProviderKey = (pIndex: number, kIndex: number, value: string) => {
-        const updated = [...localSettings.customProviders];
-        updated[pIndex].apiKeys[kIndex].key = value;
         setLocalSettings(prev => ({ ...prev, customProviders: updated }));
     };
 
@@ -98,6 +141,80 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
         const updated = [...localSettings.customModels];
         updated.splice(index, 1);
         setLocalSettings(prev => ({ ...prev, customModels: updated }));
+    };
+
+    // Helper to render key section
+    const renderKeySection = (id: string, name: string, icon: string) => {
+        const keys = getProviderKeys(id);
+        const isBulkMode = bulkAddTarget === id;
+
+        return (
+            <div className="space-y-3 p-4 border border-white/5 rounded-xl bg-black/20" key={id}>
+                <div className="flex justify-between items-center">
+                    <label className="text-sm font-bold text-gray-200 flex items-center gap-2">
+                        <i className={`fas ${icon}`}></i> مفاتيح {name}
+                    </label>
+                    <div className="flex gap-2">
+                         <button 
+                            onClick={() => {
+                                if (isBulkMode) {
+                                    setBulkAddTarget(null);
+                                    setBulkText('');
+                                } else {
+                                    setBulkAddTarget(id);
+                                }
+                            }} 
+                            className={`text-xs px-3 py-1.5 rounded border transition-colors ${isBulkMode ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20'}`}
+                        >
+                            <i className={`fas ${isBulkMode ? 'fa-times' : 'fa-list'}`}></i> {isBulkMode ? 'إلغاء' : 'إضافة متعددة'}
+                        </button>
+                        {!isBulkMode && (
+                            <button onClick={() => addSingleKey(id)} className="text-xs bg-zeus-gold/10 text-zeus-gold px-3 py-1.5 rounded hover:bg-zeus-gold/20 border border-zeus-gold/20 transition-colors">
+                                <i className="fas fa-plus"></i> إضافة
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {isBulkMode ? (
+                    <div className="animate-fade-in space-y-2">
+                        <textarea
+                            value={bulkText}
+                            onChange={(e) => setBulkText(e.target.value)}
+                            placeholder={`ضع المفاتيح هنا..\nمفتاح 1\nمفتاح 2\nمفتاح 3`}
+                            className="w-full h-32 bg-black/40 border border-zeus-gold/30 rounded-lg p-3 text-sm focus:border-zeus-gold focus:outline-none text-left ltr font-mono resize-none"
+                        />
+                        <button 
+                            onClick={() => handleBulkAddSubmit(id)}
+                            className="w-full py-2 bg-zeus-gold text-black font-bold rounded-lg hover:bg-yellow-400"
+                        >
+                            تأكيد وإضافة
+                        </button>
+                    </div>
+                ) : (
+                    <div className="space-y-2">
+                        {keys.length === 0 && <p className="text-xs text-gray-500 text-center py-2">لا يوجد مفاتيح مضافة.</p>}
+                        {keys.map((k, i) => (
+                            <div key={i} className="flex gap-2">
+                                <input 
+                                    type="password" 
+                                    value={k.key}
+                                    onChange={(e) => updateKeyValue(id, i, e.target.value)}
+                                    placeholder={`${name} API Key...`}
+                                    className="flex-1 bg-black/40 border border-white/10 rounded-lg p-2 text-sm focus:border-zeus-gold focus:outline-none text-left ltr font-mono"
+                                />
+                                <button 
+                                    onClick={() => deleteKey(id, i)}
+                                    className="p-2 text-red-500 hover:bg-red-500/10 rounded border border-transparent hover:border-red-500/20 transition-all"
+                                >
+                                    <i className="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
     };
 
     return (
@@ -229,71 +346,13 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
 
                     {activeTab === 'keys' && (
                         <div className="space-y-8 animate-fade-in">
-                            {/* Gemini Keys */}
-                            <div className="space-y-3 p-4 border border-white/5 rounded-xl bg-black/20">
-                                <div className="flex justify-between items-center">
-                                    <label className="text-sm font-bold text-gray-200 flex items-center gap-2">
-                                        <i className="fab fa-google"></i> مفاتيح Gemini
-                                    </label>
-                                    <button onClick={() => addKey('gemini')} className="text-xs bg-zeus-gold/10 text-zeus-gold px-3 py-1.5 rounded hover:bg-zeus-gold/20 border border-zeus-gold/20 transition-colors">
-                                        <i className="fas fa-plus"></i> إضافة
-                                    </button>
-                                </div>
-                                {localSettings.geminiApiKeys.map((k, i) => (
-                                    <div key={i} className="flex gap-2">
-                                        <input 
-                                            type="password" 
-                                            value={k.key}
-                                            onChange={(e) => updateKey('gemini', i, e.target.value)}
-                                            placeholder="AIzaSy..."
-                                            className="flex-1 bg-black/40 border border-white/10 rounded-lg p-2 text-sm focus:border-zeus-gold focus:outline-none text-left ltr"
-                                        />
-                                        <button 
-                                            onClick={() => {
-                                                const newKeys = [...localSettings.geminiApiKeys];
-                                                newKeys.splice(i, 1);
-                                                setLocalSettings({...localSettings, geminiApiKeys: newKeys});
-                                            }}
-                                            className="p-2 text-red-500 hover:bg-red-500/10 rounded"
-                                        >
-                                            <i className="fas fa-trash"></i>
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-
-                            {/* OpenRouter Keys */}
-                            <div className="space-y-3 p-4 border border-white/5 rounded-xl bg-black/20">
-                                <div className="flex justify-between items-center">
-                                    <label className="text-sm font-bold text-gray-200 flex items-center gap-2">
-                                        <i className="fas fa-network-wired"></i> مفاتيح OpenRouter
-                                    </label>
-                                    <button onClick={() => addKey('openrouter')} className="text-xs bg-zeus-gold/10 text-zeus-gold px-3 py-1.5 rounded hover:bg-zeus-gold/20 border border-zeus-gold/20 transition-colors">
-                                        <i className="fas fa-plus"></i> إضافة
-                                    </button>
-                                </div>
-                                {localSettings.openrouterApiKeys.map((k, i) => (
-                                    <div key={i} className="flex gap-2">
-                                        <input 
-                                            type="password" 
-                                            value={k.key}
-                                            onChange={(e) => updateKey('openrouter', i, e.target.value)}
-                                            placeholder="sk-or-..."
-                                            className="flex-1 bg-black/40 border border-white/10 rounded-lg p-2 text-sm focus:border-zeus-gold focus:outline-none text-left ltr"
-                                        />
-                                        <button 
-                                            onClick={() => {
-                                                const newKeys = [...localSettings.openrouterApiKeys];
-                                                newKeys.splice(i, 1);
-                                                setLocalSettings({...localSettings, openrouterApiKeys: newKeys});
-                                            }}
-                                            className="p-2 text-red-500 hover:bg-red-500/10 rounded"
-                                        >
-                                            <i className="fas fa-trash"></i>
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
+                            {renderKeySection('gemini', 'Gemini', 'fa-google')}
+                            {renderKeySection('openrouter', 'OpenRouter', 'fa-network-wired')}
+                            
+                            {/* عرض المزودين المخصصين أيضاً في قائمة المفاتيح */}
+                            {localSettings.customProviders.map(provider => (
+                                renderKeySection(provider.id, provider.name, 'fa-server')
+                            ))}
                         </div>
                     )}
 
@@ -330,15 +389,9 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                                         </div>
                                     </div>
                                     
-                                    <div className="space-y-2">
-                                        <label className="text-xs text-gray-400">مفتاح API</label>
-                                        <input 
-                                            type="password" 
-                                            value={provider.apiKeys[0]?.key || ''}
-                                            onChange={(e) => updateCustomProviderKey(idx, 0, e.target.value)}
-                                            className="w-full bg-black/40 border border-white/10 rounded p-2 text-sm focus:border-zeus-gold outline-none text-left ltr"
-                                            placeholder="sk-..."
-                                        />
+                                    {/* تم نقل إدارة المفاتيح إلى تبويب المفاتيح، لكن يمكن إبقاء المفتاح الأول هنا للتسهيل */}
+                                    <div className="space-y-2 opacity-50">
+                                        <label className="text-xs text-gray-400">لإدارة المفاتيح، انتقل لتبويب "المفاتيح"</label>
                                     </div>
                                 </div>
                             ))}

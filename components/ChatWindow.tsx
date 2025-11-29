@@ -101,17 +101,21 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
                     </button>
                 )}
                 
-                <div className="mt-3 pt-2 border-t border-white/5 flex justify-between items-center opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="text-[10px] text-gray-500 font-mono">
-                        {new Date(msg.timestamp).toLocaleTimeString('ar-EG')}
+                {/* تذييل الرسالة: الوقت وزر النسخ */}
+                <div className="mt-2 pt-2 border-t border-white/5 flex justify-between items-center gap-2 select-none">
+                     {/* الوقت: يظهر عند التحويم على الديسك توب، ويظهر دائماً في الموبايل. إنجليزي وبدون ثواني */}
+                    <span className="text-[9px] md:text-[11px] text-gray-600 font-mono opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity duration-300" dir="ltr">
+                        {new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
                     </span>
+                    
+                    {/* زر النسخ: ظاهر دائماً */}
                     {msg.content && (
                         <button 
                             onClick={() => navigator.clipboard.writeText(msg.content)}
-                            className="text-gray-500 hover:text-zeus-gold transition-colors p-1"
-                            title="نسخ النص"
+                            className="text-gray-500 hover:text-zeus-gold transition-colors p-1 opacity-70 hover:opacity-100"
+                            title="Copy"
                         >
-                            <i className="fas fa-copy"></i>
+                            <i className="fas fa-copy text-[10px] md:text-xs"></i>
                         </button>
                     )}
                 </div>
