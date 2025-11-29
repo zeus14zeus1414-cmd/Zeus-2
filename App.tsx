@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Chat, Message, Attachment } from './types';
 import { streamResponse, generateChatTitle } from './services/ai';
 import Sidebar from './components/Sidebar';
@@ -17,7 +17,7 @@ const defaultSettings: Settings = {
     customPrompt: '',
     apiKeyRetryStrategy: 'sequential',
     fontSize: 18,
-    thinkingBudget: 1024 // الافتراضي قيمة معقولة ليستخدمها الزر عند التفعيل
+    thinkingBudget: 1024 
 };
 
 const App: React.FC = () => {
@@ -27,13 +27,15 @@ const App: React.FC = () => {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
+    
+    // مرجع للتحكم في إيقاف التوليد
+    const abortControllerRef = useRef<AbortController | null>(null);
 
     // Modal States
     const [activeModal, setActiveModal] = useState<'delete' | 'rename' | null>(null);
     const [modalTargetId, setModalTargetId] = useState<string | null>(null);
     const [modalTargetTitle, setModalTargetTitle] = useState<string>('');
     
-    // تحميل البيانات
     useEffect(() => {
         try {
             const loadedChats = localStorage.getItem('zeusChats');
@@ -46,18 +48,16 @@ const App: React.FC = () => {
         }
     }, []);
 
-    // حفظ البيانات - Debounced
     useEffect(() => {
         const handler = setTimeout(() => {
             localStorage.setItem('zeusChats', JSON.stringify(chats));
             localStorage.setItem('zeusSettings', JSON.stringify(settings));
             if (currentChatId) localStorage.setItem('zeusCurrentChatId', currentChatId);
-        }, 1000); // تأخير ثانية واحدة لتجنب تجميد الواجهة
+        }, 1000); 
 
         return () => clearTimeout(handler);
     }, [chats, settings, currentChatId]);
 
-    // تطبيق حجم الخط
     useEffect(() => {
         document.documentElement.style.setProperty('--message-font-size', `${settings.fontSize}px`);
     }, [settings.fontSize]);
@@ -77,13 +77,11 @@ const App: React.FC = () => {
         if (window.innerWidth < 768) setIsSidebarOpen(false);
     };
 
-    // Trigger Modal
     const requestDeleteChat = (id: string) => {
         setModalTargetId(id);
         setActiveModal('delete');
     };
 
-    // Actual Logic
     const confirmDeleteChat = () => {
         if (modalTargetId) {
             setChats(prev => {
@@ -97,14 +95,12 @@ const App: React.FC = () => {
         }
     };
 
-    // Trigger Modal
     const requestRenameChat = (id: string, currentTitle: string) => {
         setModalTargetId(id);
         setModalTargetTitle(currentTitle);
         setActiveModal('rename');
     };
 
-    // Actual Logic
     const confirmRenameChat = (newTitle: string) => {
         if (modalTargetId) {
             setChats(prev => ({
@@ -123,9 +119,26 @@ const App: React.FC = () => {
         }));
     };
 
+    // دالة إيقاف التوليد
+    const handleStopGeneration = () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+            setIsStreaming(false);
+        }
+    };
+
     const handleSendMessage = async (content: string, attachments: Attachment[], forceThink: boolean = false) => {
         if (!content.trim() && attachments.length === 0) return;
         
+        // إلغاء أي طلب سابق إذا وجد
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+        }
+        // إنشاء متحكم جديد
+        const abortController = new AbortController();
+        abortControllerRef.current = abortController;
+
         let chatId = currentChatId;
         const isNewChat = !chatId || !chats[chatId] || chats[chatId].messages.length === 0;
 
@@ -151,7 +164,6 @@ const App: React.FC = () => {
             timestamp: Date.now()
         };
 
-        // 1. إضافة رسالة المستخدم
         setChats(prev => {
             const chat = prev[chatId!];
             return {
@@ -177,7 +189,6 @@ const App: React.FC = () => {
 
         const assistantMsgId = (Date.now() + 1).toString();
         
-        // 2. إضافة رسالة المساعد الفارغة فوراً (Placeholder) ليظهر المؤشر داخل الفقاعة
         setChats(prev => {
             const chat = prev[chatId!];
             return {
@@ -189,7 +200,7 @@ const App: React.FC = () => {
                         {
                             id: assistantMsgId,
                             role: 'assistant',
-                            content: '', // محتوى فارغ في البداية
+                            content: '', 
                             timestamp: Date.now()
                         }
                     ]
@@ -203,60 +214,65 @@ const App: React.FC = () => {
 
             let streamedContent = '';
             
-            // المنطق الجديد للميزانية:
-            // إذا كان الزر مفعلاً (forceThink): نستخدم القيمة الموجودة في الإعدادات.
-            // إذا كان الزر غير مفعل: نرسل 0 (لتعطيل التفكير تماماً).
             const runSettings = {
                 ...settings,
                 thinkingBudget: forceThink ? settings.thinkingBudget : 0
             };
             
-            await streamResponse(history, runSettings, (chunk) => {
-                streamedContent += chunk;
-                
-                // تحديث محتوى الرسالة الموجودة بالفعل
+            await streamResponse(
+                history, 
+                runSettings, 
+                (chunk) => {
+                    streamedContent += chunk;
+                    
+                    setChats(prev => {
+                        const currentChat = prev[chatId!];
+                        if (!currentChat) return prev;
+                        
+                        const msgs = [...currentChat.messages];
+                        const lastMsgIndex = msgs.findIndex(m => m.id === assistantMsgId);
+                        
+                        if (lastMsgIndex !== -1) {
+                            msgs[lastMsgIndex] = {
+                                ...msgs[lastMsgIndex],
+                                content: streamedContent
+                            };
+                        }
+                        
+                        return {
+                            ...prev,
+                            [chatId!]: { ...currentChat, messages: msgs }
+                        };
+                    });
+                },
+                abortController.signal // تمرير إشارة الإيقاف
+            );
+
+        } catch (error: any) {
+            if (error.name === 'AbortError') {
+                console.log('Generation stopped by user');
+            } else {
                 setChats(prev => {
                     const currentChat = prev[chatId!];
-                    if (!currentChat) return prev;
-                    
                     const msgs = [...currentChat.messages];
                     const lastMsgIndex = msgs.findIndex(m => m.id === assistantMsgId);
                     
                     if (lastMsgIndex !== -1) {
                         msgs[lastMsgIndex] = {
                             ...msgs[lastMsgIndex],
-                            content: streamedContent
+                            content: msgs[lastMsgIndex].content + `\n\n⚠️ خطأ: ${error.message || 'حدث خطأ غير متوقع.'}`
                         };
                     }
-                    
+
                     return {
                         ...prev,
                         [chatId!]: { ...currentChat, messages: msgs }
                     };
                 });
-            });
-
-        } catch (error: any) {
-            setChats(prev => {
-                const currentChat = prev[chatId!];
-                // تحديث الرسالة لتعرض الخطأ
-                const msgs = [...currentChat.messages];
-                const lastMsgIndex = msgs.findIndex(m => m.id === assistantMsgId);
-                
-                if (lastMsgIndex !== -1) {
-                     msgs[lastMsgIndex] = {
-                        ...msgs[lastMsgIndex],
-                        content: `⚠️ خطأ: ${error.message || 'حدث خطأ غير متوقع.'}`
-                    };
-                }
-
-                return {
-                    ...prev,
-                    [chatId!]: { ...currentChat, messages: msgs }
-                };
-            });
+            }
         } finally {
             setIsStreaming(false);
+            abortControllerRef.current = null;
         }
     };
 
@@ -272,7 +288,6 @@ const App: React.FC = () => {
     return (
         <div className="relative flex flex-col h-[100dvh] w-full bg-zeus-base text-white font-sans overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" dir="rtl">
             
-            {/* تراكب الموبايل */}
             {isSidebarOpen && (
                 <div 
                     className="absolute inset-0 bg-black/50 z-20 md:hidden backdrop-blur-sm"
@@ -281,7 +296,6 @@ const App: React.FC = () => {
             )}
 
             <div className="flex flex-1 overflow-hidden relative">
-                {/* القائمة الجانبية */}
                 <div className={`
                     absolute md:relative z-30 h-full transition-all duration-300 ease-in-out
                     ${isSidebarOpen ? 'translate-x-0 w-80' : 'translate-x-full md:translate-x-0 md:w-0 md:opacity-0 md:overflow-hidden'}
@@ -303,9 +317,7 @@ const App: React.FC = () => {
                     />
                 </div>
 
-                {/* منطقة المحادثة الرئيسية */}
                 <div className="flex-1 flex flex-col z-10 relative h-full max-w-full bg-black">
-                    {/* الهيدر */}
                     <header className="flex items-center justify-between p-4 border-b border-white/10 bg-zeus-surface shrink-0 relative z-50">
                         <div className="flex items-center gap-3">
                             <button 
@@ -339,17 +351,16 @@ const App: React.FC = () => {
                         </div>
                     </header>
 
-                    {/* نافذة المحادثة */}
                     <ChatWindow 
                         chat={currentChatId ? chats[currentChatId] : null}
                         onSendMessage={handleSendMessage}
                         isStreaming={isStreaming}
                         onNewChat={createNewChat} 
+                        onStop={handleStopGeneration} // تمرير دالة الإيقاف
                     />
                 </div>
             </div>
 
-            {/* مودال الإعدادات */}
             {isSettingsOpen && (
                 <SettingsModal 
                     settings={settings}
@@ -358,7 +369,6 @@ const App: React.FC = () => {
                 />
             )}
 
-            {/* مودال الحذف */}
             <DeleteModal 
                 isOpen={activeModal === 'delete'} 
                 chatTitle={modalTargetId ? chats[modalTargetId]?.title : ''}
@@ -366,7 +376,6 @@ const App: React.FC = () => {
                 onConfirm={confirmDeleteChat}
             />
 
-            {/* مودال إعادة التسمية */}
             <RenameModal
                 isOpen={activeModal === 'rename'}
                 initialTitle={modalTargetTitle}

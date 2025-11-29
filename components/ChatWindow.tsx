@@ -8,22 +8,19 @@ interface Props {
     onSendMessage: (text: string, files: Attachment[], forceThink: boolean) => void;
     isStreaming: boolean;
     onNewChat: () => void;
+    onStop?: () => void; // إضافة خاصية الإيقاف
 }
 
-// إعدادات الحد الأقصى للعرض والتحميل
 const MAX_COLLAPSED_LENGTH = 350; 
 const MAX_COLLAPSED_LINES = 6;    
 const MESSAGES_BATCH_SIZE = 50;   
 
-// --- مكون الرسالة المنفصل ---
 const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }: { msg: Message, isLast: boolean, isStreaming: boolean, forceThinkEnabled: boolean }) => {
     const isUser = msg.role === 'user';
     const [isExpanded, setIsExpanded] = useState(false);
     
-    // حالة توسيع قسم التفكير
     const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
     
-    // تحليل المحتوى لاستخراج التفكير
     const parsedContent = useMemo(() => {
         const rawContent = msg.content || '';
         const thinkRegex = /<(?:think|فكّر|تفكير)>([\s\S]*?)<\/(?:think|فكّر|تفكير)>/i;
@@ -51,32 +48,23 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
 
     const { thinkContent, finalAnswer } = parsedContent;
 
-    // حالة الانتظار الحقيقية: لا يوجد أي محتوى (لا تفكير ولا جواب)
     const isWaitingForFirstToken = !isUser && isLast && isStreaming && finalAnswer.length === 0 && thinkContent.length === 0;
 
-    // هل هذه رسالة تفكير عميق؟ (إما فيها محتوى تفكير، أو نحن ننتظر والزر مفعل)
     const isDeepThinkMode = thinkContent.length > 0 || (isWaitingForFirstToken && forceThinkEnabled);
 
-    // تحديد النص المعروض أثناء الانتظار
     const loadingText = isDeepThinkMode ? 'جاري التفكير العميق...' : 'لحظة من فضلك...';
 
-    // هل نعرض الهيدر؟
-    // 1. في وضع التفكير العميق: يظهر دائماً.
-    // 2. في الوضع العادي: يظهر فقط أثناء الانتظار (ويختفي عند وصول النص).
     const showHeader = isDeepThinkMode || isWaitingForFirstToken;
 
-    // هل نعرض الجسم؟
     const hasContent = finalAnswer.length > 0 || thinkContent.length > 0;
     const showBody = isUser || hasContent;
 
-    // حساب ما إذا كانت الرسالة طويلة جداً
     const shouldCollapse = useMemo(() => {
         if (isLast && isStreaming && !isUser) return false;
         const lines = finalAnswer.split('\n').length;
         return finalAnswer.length > MAX_COLLAPSED_LENGTH || lines > MAX_COLLAPSED_LINES;
     }, [finalAnswer, isLast, isStreaming, isUser]);
 
-    // معالجة Markdown
     const htmlContent = useMemo(() => {
         let content = finalAnswer || ' '; 
         if (shouldCollapse && !isExpanded) {
@@ -94,7 +82,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
         return marked.parse(thinkContent) as string;
     }, [thinkContent]);
 
-    // حالة المعالجة (جاري الكتابة/التفكير)
     const isProcessing = !isUser && isLast && isStreaming;
 
     return (
@@ -105,32 +92,27 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
                     ? 'bg-gradient-to-br from-zeus-surface to-gray-900 border border-zeus-gold/20 text-white rounded-2xl rounded-tl-sm p-4 md:p-5' 
                     : `bg-black/60 border border-zeus-gold/30 text-gray-100 shadow-[0_0_20px_rgba(255,215,0,0.05)]
                        ${isWaitingForFirstToken 
-                            ? 'rounded-[2rem] py-2 px-5 items-center justify-center' // حالة الانكماش (الكبسولة)
-                            : 'rounded-2xl rounded-tr-sm p-4 md:p-5' // حالة التمدد
+                            ? 'rounded-[2rem] py-2 px-5 items-center justify-center' 
+                            : 'rounded-2xl rounded-tr-sm p-4 md:p-5' 
                        }`
                 }
             `}>
                 {!isUser && (
                     <>
-                        {/* 
-                           الهيدر الموحد
-                        */}
                         {showHeader && (
                             <div 
                                 className={`flex items-center gap-3 transition-all duration-300
                                     ${!isProcessing && isDeepThinkMode ? 'cursor-pointer hover:bg-white/5 rounded-lg -mx-2 px-2 py-1' : ''}
-                                    ${/* إخفاء الهامش السفلي إذا كنا في حالة الانتظار المنكمشة */ isWaitingForFirstToken ? 'mb-0' : 'mb-3'}
+                                    ${isWaitingForFirstToken ? 'mb-0' : 'mb-3'}
                                 `}
                                 onClick={() => (!isProcessing && isDeepThinkMode) && setIsThinkingExpanded(!isThinkingExpanded)}
                             >
                                 <div className="relative w-6 h-6 flex items-center justify-center flex-shrink-0">
                                     {isProcessing ? (
-                                        /* Snake Loader */
                                         <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50">
                                             <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="animate-dash-flow" strokeDasharray="28 6 28 6 28 30" />
                                         </svg>
                                     ) : (
-                                        /* Static Completed Circle */
                                         <div className="w-full h-full rounded-full border-2 border-zeus-gold shadow-[0_0_10px_rgba(255,215,0,0.5)]"></div>
                                     )}
                                     <i className="fas fa-bolt text-[10px] text-zeus-gold absolute"></i>
@@ -151,12 +133,10 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
                             </div>
                         )}
 
-                        {/* فاصل ذهبي يظهر فقط عند وجود محتوى (تفكير أو جواب) */}
                         {isDeepThinkMode && !isWaitingForFirstToken && (
                              <div className={`h-px w-full bg-zeus-gold/20 mb-4 transition-all duration-500 ${isWaitingForFirstToken ? 'opacity-0' : 'opacity-100'}`}></div>
                         )}
 
-                        {/* --- Thinking Content --- */}
                         {isDeepThinkMode && isThinkingExpanded && thinkContent && (
                             <div className="mb-4 pl-4 border-r-2 border-zeus-gold/20 animate-slide-up">
                                 <div 
@@ -169,7 +149,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
                     </>
                 )}
 
-                {/* --- User Header --- */}
                 {isUser && (
                     <div className="text-xs mb-3 opacity-70 flex items-center gap-2 border-b border-white/5 pb-2">
                         <i className="fas fa-user text-blue-400"></i>
@@ -196,7 +175,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
                     </div>
                 )}
 
-                {/* --- Main Message Body --- */}
                 {showBody && (
                     <div 
                         className={`markdown-body leading-relaxed min-w-0 break-words ${shouldCollapse && !isExpanded ? 'mask-bottom' : ''} animate-fade-in`}
@@ -222,7 +200,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
                     </button>
                 )}
                 
-                {/* تذييل الرسالة */}
                 {(isUser || hasContent) && (
                     <div className="mt-2 pt-2 border-t border-white/5 flex justify-between items-center gap-2 select-none">
                         <span className="text-[9px] md:text-[11px] text-gray-600 font-mono opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity duration-300" dir="ltr">
@@ -252,13 +229,13 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
     );
 });
 
-const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewChat }) => {
+const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewChat, onStop }) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [inputValue, setInputValue] = useState('');
     const [textDirection, setTextDirection] = useState<'rtl' | 'ltr'>('rtl');
     const [attachments, setAttachments] = useState<Attachment[]>([]);
-    const [isThinkingEnabled, setIsThinkingEnabled] = useState(false); // زر التفكير
+    const [isThinkingEnabled, setIsThinkingEnabled] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [showScrollButton, setShowScrollButton] = useState(false);
@@ -517,7 +494,6 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                     </button>
                     <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileSelect}/>
 
-                    {/* زر التفكير الإجباري - مفتاح تشغيل/إطفاء */}
                     <button 
                         onClick={() => setIsThinkingEnabled(!isThinkingEnabled)}
                         className={`h-11 w-11 md:h-14 md:w-14 transition-colors flex-shrink-0 flex items-center justify-center border-l border-zeus-gold/30 ${isThinkingEnabled ? 'text-zeus-gold bg-zeus-gold/10' : 'text-gray-400 hover:text-zeus-gold hover:bg-white/5'}`}
@@ -538,9 +514,23 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                         rows={1}
                     />
 
-                    <button onClick={handleSubmit} disabled={(!inputValue.trim() && attachments.length === 0) || isStreaming} className={`h-11 w-11 md:h-14 md:w-14 transition-all duration-300 flex-shrink-0 flex items-center justify-center border-r border-zeus-gold/30 ${(!inputValue.trim() && attachments.length === 0) || isStreaming ? 'text-gray-600 cursor-not-allowed' : 'text-zeus-gold hover:bg-zeus-gold/10 hover:text-yellow-400'}`}>
-                        <i className={`fas ${isStreaming ? 'fa-stop animate-pulse' : 'fa-paper-plane'} text-lg md:text-xl transform ${!isStreaming ? '-rotate-0' : ''}`}></i>
-                    </button>
+                    {isStreaming ? (
+                        <button 
+                            onClick={onStop} // استدعاء دالة الإيقاف
+                            className="h-11 w-11 md:h-14 md:w-14 transition-all duration-300 flex-shrink-0 flex items-center justify-center border-r border-zeus-gold/30 text-red-500 hover:bg-red-500/10 hover:text-red-400"
+                            title="إيقاف التوليد"
+                        >
+                            <i className="fas fa-stop animate-pulse text-lg md:text-xl"></i>
+                        </button>
+                    ) : (
+                        <button 
+                            onClick={handleSubmit} 
+                            disabled={!inputValue.trim() && attachments.length === 0} 
+                            className={`h-11 w-11 md:h-14 md:w-14 transition-all duration-300 flex-shrink-0 flex items-center justify-center border-r border-zeus-gold/30 ${(!inputValue.trim() && attachments.length === 0) ? 'text-gray-600 cursor-not-allowed' : 'text-zeus-gold hover:bg-zeus-gold/10 hover:text-yellow-400'}`}
+                        >
+                            <i className="fas fa-paper-plane text-lg md:text-xl"></i>
+                        </button>
+                    )}
                 </div>
                 
                 <div className="text-center mt-2 text-[10px] text-gray-500 font-sans">

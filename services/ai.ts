@@ -16,7 +16,6 @@ export const AI_MODELS = {
     ]
 };
 
-// تعليمة صارمة لإجبار النموذج على إخراج التفكير بصيغة قابلة للتحليل وباللغة العربية
 const THINKING_SYSTEM_INSTRUCTION = `
 IMPORTANT: You are currently in "Deep Thinking Mode".
 1. Before answering, you MUST engage in a comprehensive, step-by-step reasoning process.
@@ -36,34 +35,40 @@ Format your response exactly like this:
 export const streamResponse = async (
     messages: Message[], 
     settings: Settings, 
-    onChunk: (chunk: string) => void
+    onChunk: (chunk: string) => void,
+    signal?: AbortSignal
 ): Promise<string> => {
     const { provider, customProviders } = settings;
     
-    // تحديد المنطق بناءً على المزود
     if (provider === 'gemini') {
-        return streamGemini(messages, settings, onChunk);
+        return streamGemini(messages, settings, onChunk, signal);
     } else if (provider === 'openrouter') {
-        return streamOpenRouter(messages, settings, onChunk);
+        return streamOpenRouter(messages, settings, onChunk, signal);
     } else {
-        // البحث في المزودين المخصصين
         const customProvider = customProviders.find(p => p.id === provider);
         if (customProvider) {
-            return streamCustom(messages, settings, customProvider, onChunk);
+            return streamCustom(messages, settings, customProvider, onChunk, signal);
         }
         throw new Error(`مزود غير معروف: ${provider}`);
     }
 };
 
-// دالة جديدة لتوليد العنوان
 export const generateChatTitle = async (firstMessage: string, settings: Settings): Promise<string> => {
     try {
         const prompt = `لخص الرسالة التالية في عنوان قصير جداً (3-5 كلمات كحد أقصى) للمحادثة. العنوان فقط بدون أي مقدمات أو علامات تنصيص.\nالرسالة: ${firstMessage}`;
         const titleSettings = { ...settings, temperature: 0.5 };
         
+        // استخدام AbortController مؤقت للعنوان لتجنب التعارض
+        const ac = new AbortController();
+        setTimeout(() => ac.abort(), 10000); // مهلة 10 ثواني
+
         if (settings.provider === 'gemini') {
+            const keys = settings.geminiApiKeys.filter(k => k.status === 'active');
+            if (keys.length === 0) throw new Error("No active keys for title generation");
+            
+            // محاولة بسيطة مع أول مفتاح فقط لتوليد العنوان
+            const apiKey = keys[0].key;
             titleSettings.model = 'gemini-2.0-flash-lite-preview-02-05'; 
-            const apiKey = getActiveKey(settings.geminiApiKeys);
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${titleSettings.model}:generateContent?key=${apiKey}`;
             
             const response = await fetch(url, {
@@ -71,7 +76,8 @@ export const generateChatTitle = async (firstMessage: string, settings: Settings
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts: [{ text: prompt }] }]
-                })
+                }),
+                signal: ac.signal
             });
 
             if(response.ok) {
@@ -85,236 +91,247 @@ export const generateChatTitle = async (firstMessage: string, settings: Settings
         }];
         
         let title = "";
-        await streamResponse(dummyMessages, settings, (chunk) => { title += chunk; });
+        await streamResponse(dummyMessages, settings, (chunk) => { title += chunk; }, ac.signal);
         return title.trim().replace(/^["']|["']$/g, '') || "محادثة جديدة";
 
     } catch (e) {
-        console.error("فشل توليد العنوان:", e);
         return firstMessage.slice(0, 30) || "محادثة جديدة";
     }
 };
 
-const getActiveKey = (keys: { key: string; status: string }[]) => {
-    const active = keys.find(k => k.status === 'active');
-    if (!active) throw new Error("لا يوجد مفتاح API نشط. يرجى التحقق من الإعدادات.");
-    return active.key;
+// دالة مساعدة للحصول على جميع المفاتيح النشطة وتدويرها
+const streamWithKeyRotation = async (
+    activeKeys: { key: string }[],
+    operationName: string,
+    operation: (apiKey: string) => Promise<string>
+): Promise<string> => {
+    if (activeKeys.length === 0) {
+        throw new Error(`لا يوجد مفاتيح API نشطة لـ ${operationName}. يرجى التحقق من الإعدادات.`);
+    }
+
+    let lastError: any = null;
+
+    // حلقة تكرار للمحاولة بكل المفاتيح
+    for (let i = 0; i < activeKeys.length; i++) {
+        const apiKey = activeKeys[i].key;
+        try {
+            return await operation(apiKey);
+        } catch (error: any) {
+            // إذا كان الخطأ بسبب إيقاف المستخدم، نوقف المحاولات فوراً ونعيد الخطأ
+            if (error.name === 'AbortError') {
+                throw error;
+            }
+
+            console.warn(`فشل المفتاح رقم ${i + 1} (${apiKey.slice(0, 5)}...) لـ ${operationName}:`, error);
+            lastError = error;
+            
+            // الاستمرار للمفتاح التالي في الحلقة...
+        }
+    }
+
+    // إذا وصلنا هنا، يعني كل المفاتيح فشلت
+    throw new Error(`فشلت جميع المحاولات باستخدام ${activeKeys.length} مفاتيح. آخر خطأ: ${lastError?.message || 'غير معروف'}`);
 };
 
-const streamGemini = async (messages: Message[], settings: Settings, onChunk: (chunk: string) => void): Promise<string> => {
-    const apiKey = getActiveKey(settings.geminiApiKeys);
-    // نستخدم الإصدار v1alpha لدعم بعض الميزات التجريبية إذا لزم الأمر، لكن v1beta مستقر أكثر
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:streamGenerateContent?key=${apiKey}&alt=sse`;
-
-    const contents = messages.map(msg => {
-        if (msg.role === 'user') {
-            const parts: any[] = [];
-            if (msg.attachments) {
-                msg.attachments.forEach(att => {
-                    if (att.dataType === 'image') {
-                        parts.push({ inline_data: { mime_type: att.mimeType, data: att.content } });
-                    } else {
-                        parts.push({ text: `\n\n--- محتوى الملف: ${att.name} ---\n${att.content}\n--- نهاية الملف ---\n` });
-                    }
-                });
-            }
-            parts.push({ text: msg.content || " " }); 
-            return { role: 'user', parts };
-        }
-        return { role: 'model', parts: [{ text: msg.content }] };
-    });
-
-    // دمج تعليمات النظام
-    let systemInstructionText = settings.customPrompt || "";
+const streamGemini = async (messages: Message[], settings: Settings, onChunk: (chunk: string) => void, signal?: AbortSignal): Promise<string> => {
+    const activeKeys = settings.geminiApiKeys.filter(k => k.status === 'active');
     
-    // إذا كانت ميزانية التفكير مفعلة، نحقن التعليمات الصارمة
-    if (settings.thinkingBudget > 0) {
-        systemInstructionText = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemInstructionText}`;
-    }
+    return streamWithKeyRotation(activeKeys, 'Gemini', async (apiKey) => {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:streamGenerateContent?key=${apiKey}&alt=sse`;
 
-    // بناء إعدادات التوليد
-    const generationConfig: any = {
-        temperature: settings.temperature,
-        maxOutputTokens: 8192
-    };
+        const contents = messages.map(msg => {
+            if (msg.role === 'user') {
+                const parts: any[] = [];
+                if (msg.attachments) {
+                    msg.attachments.forEach(att => {
+                        if (att.dataType === 'image') {
+                            parts.push({ inline_data: { mime_type: att.mimeType, data: att.content } });
+                        } else {
+                            parts.push({ text: `\n\n--- محتوى الملف: ${att.name} ---\n${att.content}\n--- نهاية الملف ---\n` });
+                        }
+                    });
+                }
+                parts.push({ text: msg.content || " " }); 
+                return { role: 'user', parts };
+            }
+            return { role: 'model', parts: [{ text: msg.content }] };
+        });
 
-    // إضافة إعدادات التفكير الرسمية لـ Gemini (للنماذج التي تدعمها)
-    if (settings.thinkingBudget > 0) {
-        generationConfig.thinkingConfig = { thinkingBudget: settings.thinkingBudget };
-    }
+        let systemInstructionText = settings.customPrompt || "";
+        if (settings.thinkingBudget > 0) {
+            systemInstructionText = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemInstructionText}`;
+        }
 
-    const requestBody: any = {
-        contents,
-        generationConfig
-    };
-
-    // إضافة systemInstruction فقط إذا كان هناك نص
-    if (systemInstructionText.trim()) {
-        requestBody.systemInstruction = {
-            parts: [{ text: systemInstructionText }]
+        const generationConfig: any = {
+            temperature: settings.temperature,
+            maxOutputTokens: 8192
         };
-    }
 
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-    });
+        if (settings.thinkingBudget > 0) {
+            generationConfig.thinkingConfig = { thinkingBudget: settings.thinkingBudget };
+        }
 
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Gemini Error: ${response.status} - ${errText}`);
-    }
+        const requestBody: any = { contents, generationConfig };
 
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-    let fullText = '';
-    let buffer = '';
+        if (systemInstructionText.trim()) {
+            requestBody.systemInstruction = { parts: [{ text: systemInstructionText }] };
+        }
 
-    if (!reader) throw new Error("No response body");
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+            signal // تمرير إشارة الإيقاف
+        });
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        buffer += chunk;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        
-        for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (trimmedLine.startsWith('data: ')) {
-                try {
-                    const data = JSON.parse(trimmedLine.slice(6));
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                    if (text) {
-                        fullText += text;
-                        onChunk(text);
-                    }
-                } catch (e) {
-                    // تجاهل
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Gemini Error: ${response.status} - ${errText}`);
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
+
+        if (!reader) throw new Error("No response body");
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (trimmedLine.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(trimmedLine.slice(6));
+                        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                        if (text) {
+                            fullText += text;
+                            onChunk(text);
+                        }
+                    } catch (e) { }
                 }
             }
         }
-    }
-    return fullText;
+        return fullText;
+    });
 };
 
-const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk: (chunk: string) => void): Promise<string> => {
-    const apiKey = getActiveKey(settings.openrouterApiKeys);
-    
-    const formattedMessages = messages.map(m => {
-        let content = m.content;
-        if(m.attachments?.length) {
-            m.attachments.forEach(att => {
-                if(att.dataType === 'text') content += `\n\n[ملف مرفق: ${att.name}]\n${att.content}`;
-            });
+const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk: (chunk: string) => void, signal?: AbortSignal): Promise<string> => {
+    const activeKeys = settings.openrouterApiKeys.filter(k => k.status === 'active');
+
+    return streamWithKeyRotation(activeKeys, 'OpenRouter', async (apiKey) => {
+        const formattedMessages = messages.map(m => {
+            let content = m.content;
+            if(m.attachments?.length) {
+                m.attachments.forEach(att => {
+                    if(att.dataType === 'text') content += `\n\n[ملف مرفق: ${att.name}]\n${att.content}`;
+                });
+            }
+            return { role: m.role, content };
+        });
+
+        let systemContent = settings.customPrompt || "";
+        if (settings.thinkingBudget > 0) {
+            systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
         }
-        return { role: m.role, content };
-    });
 
-    // إعداد رسالة النظام
-    let systemContent = settings.customPrompt || "";
-    
-    // حقن تعليمات التفكير لـ OpenRouter
-    if (settings.thinkingBudget > 0) {
-        systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
-    }
+        if (systemContent.trim()) {
+            formattedMessages.unshift({ role: 'system', content: systemContent });
+        }
 
-    // إضافة رسالة النظام في البداية
-    if (systemContent.trim()) {
-        formattedMessages.unshift({ role: 'system', content: systemContent });
-    }
+        const extraBody: any = {};
+        if (settings.thinkingBudget > 0 && settings.model.includes('deepseek-r1')) {
+            extraBody.include_reasoning = true;
+        }
 
-    // إعدادات خاصة لبعض النماذج في OpenRouter التي تدعم التفكير
-    const extraBody: any = {};
-    if (settings.thinkingBudget > 0 && settings.model.includes('deepseek-r1')) {
-        // DeepSeek R1 أحياناً يحتاج إعدادات خاصة، لكن غالباً التعليمات تكفي
-        // include_reasoning هو بارامتر محتمل في بعض مزودي OpenRouter
-        extraBody.include_reasoning = true;
-    }
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': window.location.origin,
+                'X-Title': 'Zeus Chat'
+            },
+            body: JSON.stringify({
+                model: settings.model,
+                messages: formattedMessages,
+                temperature: settings.temperature,
+                stream: true,
+                ...extraBody
+            }),
+            signal // تمرير إشارة الإيقاف
+        });
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': window.location.origin,
-            'X-Title': 'Zeus Chat'
-        },
-        body: JSON.stringify({
-            model: settings.model,
-            messages: formattedMessages,
-            temperature: settings.temperature,
-            stream: true,
-            ...extraBody
-        })
-    });
+        if (!response.ok) throw new Error(`OpenRouter Error: ${response.status}`);
 
-    if (!response.ok) throw new Error(`OpenRouter Error: ${response.status}`);
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
 
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-    let fullText = '';
-    let buffer = '';
+        if(!reader) throw new Error("No body");
 
-    if(!reader) throw new Error("No body");
-
-    while(true) {
-        const {done, value} = await reader.read();
-        if(done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        buffer += chunk;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        
-        for(const line of lines) {
-            const trimmedLine = line.trim();
-            if(trimmedLine.startsWith('data: ')) {
-                const dataStr = trimmedLine.slice(6);
-                if(dataStr === '[DONE]') break;
-                try {
-                    const data = JSON.parse(dataStr);
-                    // OpenRouter أحياناً يرسل التفكير في حقل خاص أو داخل المحتوى
-                    const content = data.choices[0]?.delta?.content || data.choices[0]?.delta?.reasoning || '';
-                    if(content) {
-                        fullText += content;
-                        onChunk(content);
-                    }
-                } catch(e) {}
+        while(true) {
+            const {done, value} = await reader.read();
+            if(done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for(const line of lines) {
+                const trimmedLine = line.trim();
+                if(trimmedLine.startsWith('data: ')) {
+                    const dataStr = trimmedLine.slice(6);
+                    if(dataStr === '[DONE]') break;
+                    try {
+                        const data = JSON.parse(dataStr);
+                        const content = data.choices[0]?.delta?.content || data.choices[0]?.delta?.reasoning || '';
+                        if(content) {
+                            fullText += content;
+                            onChunk(content);
+                        }
+                    } catch(e) {}
+                }
             }
         }
-    }
-    return fullText;
+        return fullText;
+    });
 };
 
-const streamCustom = async (messages: Message[], settings: Settings, provider: any, onChunk: (chunk: string) => void): Promise<string> => {
-    const apiKey = provider.apiKeys.find((k:any) => k.status === 'active')?.key;
-    if(!apiKey) throw new Error("لا يوجد مفتاح نشط للمزود المخصص");
+const streamCustom = async (messages: Message[], settings: Settings, provider: any, onChunk: (chunk: string) => void, signal?: AbortSignal): Promise<string> => {
+    const activeKeys = provider.apiKeys.filter((k: any) => k.status === 'active');
+    
+    return streamWithKeyRotation(activeKeys, provider.name, async (apiKey) => {
+        const formattedMessages = messages.map(m => {
+            let content = m.content;
+            if(m.attachments?.length) {
+                m.attachments.forEach(att => {
+                    if(att.dataType === 'text') content += `\n\n[ملف: ${att.name}]\n${att.content}`;
+                });
+            }
+            return { role: m.role, content };
+        });
 
-    const formattedMessages = messages.map(m => {
-        let content = m.content;
-        if(m.attachments?.length) {
-            m.attachments.forEach(att => {
-                if(att.dataType === 'text') content += `\n\n[ملف: ${att.name}]\n${att.content}`;
-            });
+        let systemContent = settings.customPrompt || "";
+        if (settings.thinkingBudget > 0) {
+            systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
         }
-        return { role: m.role, content };
-    });
 
-    let systemContent = settings.customPrompt || "";
-    if (settings.thinkingBudget > 0) {
-        systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
-    }
+        if (systemContent.trim()) {
+            formattedMessages.unshift({ role: 'system', content: systemContent });
+        }
 
-    if (systemContent.trim()) {
-        formattedMessages.unshift({ role: 'system', content: systemContent });
-    }
+        const url = `${provider.baseUrl}/chat/completions`.replace('//chat', '/chat');
 
-    const url = `${provider.baseUrl}/chat/completions`.replace('//chat', '/chat');
-
-    try {
         const response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -326,7 +343,8 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
                 messages: formattedMessages,
                 temperature: settings.temperature,
                 stream: false 
-            })
+            }),
+            signal // تمرير إشارة الإيقاف
         });
 
         if (!response.ok) throw new Error(`Custom Provider Error: ${response.status}`);
@@ -340,8 +358,5 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
             await new Promise(r => setTimeout(r, 20)); 
         }
         return text;
-
-    } catch (e: any) {
-        throw new Error(`خطأ في المزود المخصص: ${e.message}`);
-    }
+    });
 };
