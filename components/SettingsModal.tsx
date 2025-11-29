@@ -12,10 +12,18 @@ interface Props {
 const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
     const [localSettings, setLocalSettings] = useState<Settings>(settings);
     const [activeTab, setActiveTab] = useState<'general' | 'keys' | 'custom_providers' | 'custom_models'>('general');
+    const [isClosing, setIsClosing] = useState(false);
+
+    const handleClose = () => {
+        setIsClosing(true);
+        setTimeout(() => {
+            onClose();
+        }, 300); // Wait for animation to finish
+    };
 
     const handleSave = () => {
         onSave(localSettings);
-        onClose();
+        handleClose();
     };
 
     const addKey = (provider: 'gemini' | 'openrouter') => {
@@ -94,8 +102,15 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fade-in" dir="rtl">
-            <div className="bg-[#050505] border border-zeus-gold/20 w-full max-w-3xl rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col max-h-[90vh] overflow-hidden animate-slide-up relative">
+        <div 
+            className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md ${isClosing ? 'animate-fade-out' : 'animate-fade-in'}`} 
+            dir="rtl"
+            onClick={handleClose}
+        >
+            <div 
+                className={`bg-[#050505] border border-zeus-gold/20 w-full max-w-3xl rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col max-h-[90vh] overflow-hidden relative ${isClosing ? 'animate-scale-down' : 'animate-scale-up'}`}
+                onClick={(e) => e.stopPropagation()}
+            >
                 
                 {/* زخرفة الخلفية */}
                 <div className="absolute top-0 right-0 w-32 h-32 bg-zeus-gold/5 rounded-full blur-3xl pointer-events-none"></div>
@@ -105,7 +120,7 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                     <h2 className="text-2xl font-bold text-zeus-gold flex items-center gap-3">
                         <i className="fas fa-sliders-h"></i> إعدادات زيوس
                     </h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
+                    <button onClick={handleClose} className="text-gray-400 hover:text-white transition-colors">
                         <i className="fas fa-times text-xl"></i>
                     </button>
                 </div>
@@ -386,7 +401,7 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                 {/* تذييل */}
                 <div className="p-6 border-t border-zeus-gold/10 flex justify-end gap-4 bg-black/60">
                     <button 
-                        onClick={onClose}
+                        onClick={handleClose}
                         className="px-6 py-2 rounded-lg text-gray-300 hover:bg-white/5 transition-colors"
                     >
                         إلغاء

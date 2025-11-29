@@ -16,18 +16,43 @@ interface RenameModalProps {
 }
 
 export const DeleteModal: React.FC<DeleteModalProps> = ({ isOpen, chatTitle, onClose, onConfirm }) => {
-    if (!isOpen) return null;
+    const [isClosing, setIsClosing] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) {
+            setIsClosing(false);
+        }
+    }, [isOpen]);
+
+    if (!isOpen && !isClosing) return null;
+
+    const handleClose = () => {
+        setIsClosing(true);
+        setTimeout(() => {
+            onClose();
+            setIsClosing(false);
+        }, 300);
+    };
+
+    const handleConfirm = () => {
+        setIsClosing(true);
+        setTimeout(() => {
+            onConfirm();
+            setIsClosing(false);
+        }, 300);
+    };
 
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" dir="rtl">
-            {/* Backdrop */}
-            <div 
-                className="absolute inset-0 bg-black/80 backdrop-blur-sm animate-fade-in"
-                onClick={onClose}
-            ></div>
-
+        <div 
+            className={`fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm ${isClosing ? 'animate-fade-out' : 'animate-fade-in'}`} 
+            dir="rtl"
+            onClick={handleClose}
+        >
             {/* Modal Content */}
-            <div className="relative bg-zeus-surface border border-red-500/30 w-full max-w-md rounded-2xl shadow-[0_0_40px_rgba(220,38,38,0.2)] p-6 overflow-hidden animate-scale-up">
+            <div 
+                className={`relative bg-zeus-surface border border-red-500/30 w-full max-w-md rounded-2xl shadow-[0_0_40px_rgba(220,38,38,0.2)] p-6 overflow-hidden ${isClosing ? 'animate-scale-down' : 'animate-scale-up'}`}
+                onClick={(e) => e.stopPropagation()}
+            >
                 {/* Decoration */}
                 <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/10 blur-3xl rounded-full pointer-events-none"></div>
 
@@ -45,13 +70,13 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({ isOpen, chatTitle, onC
 
                     <div className="flex gap-3 w-full">
                         <button
-                            onClick={onClose}
+                            onClick={handleClose}
                             className="flex-1 py-3 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 font-medium transition-colors border border-white/5"
                         >
                             إلغاء
                         </button>
                         <button
-                            onClick={onConfirm}
+                            onClick={handleConfirm}
                             className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-red-600 to-red-800 hover:from-red-500 hover:to-red-700 text-white font-bold transition-all shadow-lg shadow-red-900/40 transform hover:scale-[1.02]"
                         >
                             نعم، احذف
@@ -66,35 +91,48 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({ isOpen, chatTitle, onC
 export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialTitle, onClose, onRename }) => {
     const [title, setTitle] = useState(initialTitle);
     const inputRef = useRef<HTMLInputElement>(null);
+    const [isClosing, setIsClosing] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
+            setIsClosing(false);
             setTitle(initialTitle);
-            // Focus input after animation
             setTimeout(() => inputRef.current?.focus(), 100);
         }
     }, [isOpen, initialTitle]);
 
+    if (!isOpen && !isClosing) return null;
+
+    const handleClose = () => {
+        setIsClosing(true);
+        setTimeout(() => {
+            onClose();
+            setIsClosing(false);
+        }, 300);
+    };
+
     const handleSubmit = (e?: React.FormEvent) => {
         e?.preventDefault();
         if (title.trim()) {
-            onRename(title.trim());
-            onClose();
+            setIsClosing(true);
+            setTimeout(() => {
+                onRename(title.trim());
+                setIsClosing(false);
+            }, 300);
         }
     };
 
-    if (!isOpen) return null;
-
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" dir="rtl">
-            {/* Backdrop */}
-            <div 
-                className="absolute inset-0 bg-black/80 backdrop-blur-sm animate-fade-in"
-                onClick={onClose}
-            ></div>
-
+        <div 
+            className={`fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm ${isClosing ? 'animate-fade-out' : 'animate-fade-in'}`} 
+            dir="rtl"
+            onClick={handleClose}
+        >
             {/* Modal Content */}
-            <div className="relative bg-[#0a0a0a] border border-zeus-gold/30 w-full max-w-md rounded-2xl shadow-[0_0_40px_rgba(255,215,0,0.15)] p-6 overflow-hidden animate-scale-up">
+            <div 
+                className={`relative bg-[#0a0a0a] border border-zeus-gold/30 w-full max-w-md rounded-2xl shadow-[0_0_40px_rgba(255,215,0,0.15)] p-6 overflow-hidden ${isClosing ? 'animate-scale-down' : 'animate-scale-up'}`}
+                onClick={(e) => e.stopPropagation()}
+            >
                 {/* Decoration */}
                 <div className="absolute top-0 left-0 w-32 h-32 bg-zeus-gold/5 blur-3xl rounded-full pointer-events-none"></div>
 
@@ -122,7 +160,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialTitle, 
                         <div className="flex gap-3 w-full mt-2">
                             <button
                                 type="button"
-                                onClick={onClose}
+                                onClick={handleClose}
                                 className="flex-1 py-3 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 font-medium transition-colors border border-white/5"
                             >
                                 إلغاء

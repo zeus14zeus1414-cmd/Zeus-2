@@ -131,6 +131,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [inputValue, setInputValue] = useState('');
+    const [textDirection, setTextDirection] = useState<'rtl' | 'ltr'>('rtl'); // الحالة الافتراضية RTL
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -333,12 +334,32 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         });
     };
 
+    // معالجة تغير النص
+    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const val = e.target.value;
+        setInputValue(val);
+
+        // التحقق من الحرف الأول لتحديد الاتجاه
+        // إذا كان يبدأ بحرف إنجليزي -> يسار، عدا ذلك -> يمين (افتراضي)
+        if (val.trim().length > 0) {
+            const firstChar = val.trim().charAt(0);
+            if (/^[A-Za-z]/.test(firstChar)) {
+                setTextDirection('ltr');
+            } else {
+                setTextDirection('rtl');
+            }
+        } else {
+            setTextDirection('rtl'); // عودة للأصل إذا كان فارغاً
+        }
+    };
+
     const handleSubmit = () => {
         if (!inputValue.trim() && attachments.length === 0) return;
         if (isStreaming) return;
         
         onSendMessage(inputValue, attachments);
         setInputValue('');
+        setTextDirection('rtl'); // إعادة الاتجاه لليمين بعد الإرسال
         setAttachments([]);
         
         if (textareaRef.current) {
@@ -473,14 +494,16 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                     </div>
                 )}
 
-                <div className="relative flex items-end gap-2 bg-black/60 border border-zeus-gold/30 rounded-xl p-2 focus-within:border-zeus-gold focus-within:shadow-[0_0_15px_rgba(255,215,0,0.1)] transition-all">
+                {/* شريط الإدخال المتجاوب الجديد - تم إعادة الحدود للشفافية الذهبية */}
+                <div className="relative flex items-end bg-black/60 border border-zeus-gold/30 rounded-2xl shadow-[0_0_15px_rgba(255,215,0,0.05)] transition-all focus-within:shadow-[0_0_20px_rgba(255,215,0,0.1)] overflow-hidden">
                     
+                    {/* زر المرفقات */}
                     <button 
                         onClick={() => fileInputRef.current?.click()}
-                        className="p-3 text-gray-400 hover:text-zeus-gold transition-colors hover:bg-white/5 rounded-lg flex-shrink-0 h-12 w-12 flex items-center justify-center"
+                        className="h-11 w-11 md:h-14 md:w-14 text-gray-400 hover:text-zeus-gold hover:bg-white/5 transition-colors flex-shrink-0 flex items-center justify-center border-l border-zeus-gold/30"
                         title="أرفق ملفاً"
                     >
-                        <i className="fas fa-paperclip text-lg"></i>
+                        <i className="fas fa-paperclip text-lg md:text-xl"></i>
                     </button>
                     <input 
                         type="file" 
@@ -490,32 +513,35 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                         onChange={handleFileSelect}
                     />
 
+                    {/* حقل النص */}
                     <textarea
                         ref={textareaRef}
                         value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
+                        onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
-                        placeholder="اسأل أي شيء."
-                        className="w-full bg-transparent border-none outline-none text-white resize-none py-3 px-2 placeholder-gray-500 font-sans text-lg scrollbar-thin"
+                        placeholder="اسأل أي شيء..."
+                        dir={textDirection}
+                        className="flex-1 bg-transparent border-none outline-none text-white resize-none py-3 px-3 md:py-4 md:px-4 placeholder-gray-500 font-sans text-sm md:text-lg scrollbar-thin"
                         style={{ height: 'auto', maxHeight: '200px', overflowY: 'hidden' }}
                         rows={1}
-                        dir="auto"
                     />
 
+                    {/* زر الإرسال */}
                     <button 
                         onClick={handleSubmit}
                         disabled={(!inputValue.trim() && attachments.length === 0) || isStreaming}
                         className={`
-                            p-3 rounded-lg transition-all duration-300 flex-shrink-0 h-12 w-12 flex items-center justify-center
+                            h-11 w-11 md:h-14 md:w-14 transition-all duration-300 flex-shrink-0 flex items-center justify-center border-r border-zeus-gold/30
                             ${(!inputValue.trim() && attachments.length === 0) || isStreaming 
-                                ? 'bg-white/5 text-gray-600 cursor-not-allowed' 
-                                : 'bg-zeus-gold text-black hover:bg-yellow-400 hover:scale-105 shadow-[0_0_15px_rgba(255,215,0,0.4)]'
+                                ? 'text-gray-600 cursor-not-allowed' 
+                                : 'text-zeus-gold hover:bg-zeus-gold/10 hover:text-yellow-400'
                             }
                         `}
                     >
-                        <i className={`fas ${isStreaming ? 'fa-stop' : 'fa-paper-plane'} text-lg`}></i>
+                        <i className={`fas ${isStreaming ? 'fa-stop animate-pulse' : 'fa-paper-plane'} text-lg md:text-xl transform ${!isStreaming ? '-rotate-0' : ''}`}></i>
                     </button>
                 </div>
+                
                 <div className="text-center mt-2 text-[10px] text-gray-500 font-sans">
                     زيوس قد يخطئ، راجع المعلومات المهمة.
                 </div>
