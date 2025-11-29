@@ -65,6 +65,7 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
         return finalAnswer.length > MAX_COLLAPSED_LENGTH || lines > MAX_COLLAPSED_LINES;
     }, [finalAnswer, isLast, isStreaming, isUser]);
 
+    // معالجة Markdown للنص الأساسي
     const htmlContent = useMemo(() => {
         let content = finalAnswer || ' '; // إذا كان فارغاً (بداية التوليد)، نضع مسافة للحفاظ على الهيكل
         
@@ -79,6 +80,13 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
         
         return marked.parse(content) as string;
     }, [finalAnswer, isLast, isStreaming, isUser, shouldCollapse, isExpanded]);
+
+    // معالجة Markdown لنص التفكير
+    const thinkHtmlContent = useMemo(() => {
+        if (!thinkContent) return '';
+        // نستخدم marked للتفكير أيضاً ليدعم القوائم والفقرات
+        return marked.parse(thinkContent) as string;
+    }, [thinkContent]);
 
     // تحديد حالة "التحميل" أو "الانتظار" لرسالة المساعد
     // إذا كانت آخر رسالة + وضع البث + لم يكتمل الجواب بعد (أو فارغ)
@@ -132,9 +140,11 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
                         {/* --- Thinking Content (Collapsible) --- */}
                         {isThinkingExpanded && thinkContent && (
                             <div className="mb-4 pl-4 border-r-2 border-zeus-gold/20 animate-slide-up">
-                                <div className="text-xs text-gray-400 font-mono whitespace-pre-wrap leading-relaxed opacity-80" style={{ fontSize: '0.7em' }}>
-                                    {thinkContent}
-                                </div>
+                                <div 
+                                    className="markdown-body text-gray-300 leading-relaxed opacity-90"
+                                    style={{ fontSize: '0.9em' }} 
+                                    dangerouslySetInnerHTML={{ __html: thinkHtmlContent }}
+                                />
                             </div>
                         )}
                         
