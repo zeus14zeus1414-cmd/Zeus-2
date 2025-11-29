@@ -1,0 +1,297 @@
+
+import React, { useState, useEffect } from 'react';
+import { Settings, Chat, Message, Attachment } from './types';
+import { streamResponse, generateChatTitle } from './services/ai';
+import Sidebar from './components/Sidebar';
+import ChatWindow from './components/ChatWindow';
+import SettingsModal from './components/SettingsModal';
+
+const defaultSettings: Settings = {
+    provider: 'gemini',
+    model: 'gemini-1.5-flash',
+    temperature: 0.7,
+    geminiApiKeys: [],
+    openrouterApiKeys: [],
+    customProviders: [],
+    customModels: [],
+    customPrompt: '',
+    apiKeyRetryStrategy: 'sequential',
+    fontSize: 18
+};
+
+const App: React.FC = () => {
+    const [chats, setChats] = useState<Record<string, Chat>>({});
+    const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+    const [settings, setSettings] = useState<Settings>(defaultSettings);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [isStreaming, setIsStreaming] = useState(false);
+    
+    // تحميل البيانات
+    useEffect(() => {
+        try {
+            const loadedChats = localStorage.getItem('zeusChats');
+            const loadedSettings = localStorage.getItem('zeusSettings');
+            const loadedCurrentId = localStorage.getItem('zeusCurrentChatId');
+
+            if (loadedChats) setChats(JSON.parse(loadedChats));
+            if (loadedSettings) setSettings({ ...defaultSettings, ...JSON.parse(loadedSettings) });
+            if (loadedCurrentId) setCurrentChatId(loadedCurrentId);
+        } catch (e) {
+            console.error("فشل في تحميل البيانات", e);
+        }
+    }, []);
+
+    // حفظ البيانات
+    useEffect(() => {
+        localStorage.setItem('zeusChats', JSON.stringify(chats));
+        localStorage.setItem('zeusSettings', JSON.stringify(settings));
+        if (currentChatId) localStorage.setItem('zeusCurrentChatId', currentChatId);
+    }, [chats, settings, currentChatId]);
+
+    // تطبيق حجم الخط
+    useEffect(() => {
+        document.documentElement.style.setProperty('--message-font-size', `${settings.fontSize}px`);
+    }, [settings.fontSize]);
+
+    const createNewChat = () => {
+        const id = Date.now().toString();
+        const newChat: Chat = {
+            id,
+            title: 'محادثة جديدة',
+            messages: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            order: Date.now()
+        };
+        setChats(prev => ({ ...prev, [id]: newChat }));
+        setCurrentChatId(id);
+        if (window.innerWidth < 768) setIsSidebarOpen(false);
+    };
+
+    const deleteChat = (id: string) => {
+        setChats(prev => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
+        });
+        if (currentChatId === id) setCurrentChatId(null);
+    };
+
+    const updateChatTitle = (id: string, title: string) => {
+        setChats(prev => ({
+            ...prev,
+            [id]: { ...prev[id], title, updatedAt: Date.now() }
+        }));
+    };
+
+    const handleSendMessage = async (content: string, attachments: Attachment[]) => {
+        if (!content.trim() && attachments.length === 0) return;
+        
+        let chatId = currentChatId;
+        const isNewChat = !chatId || !chats[chatId] || chats[chatId].messages.length === 0;
+
+        if (!chatId) {
+            chatId = Date.now().toString();
+            const newChat: Chat = {
+                id: chatId,
+                title: 'محادثة جديدة',
+                messages: [],
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                order: Date.now()
+            };
+            setChats(prev => ({ ...prev, [chatId!]: newChat }));
+            setCurrentChatId(chatId);
+        }
+
+        const userMsg: Message = {
+            id: Date.now().toString(),
+            role: 'user',
+            content,
+            attachments,
+            timestamp: Date.now()
+        };
+
+        // تحديث واجهة المستخدم فوراً
+        setChats(prev => {
+            const chat = prev[chatId!];
+            return {
+                ...prev,
+                [chatId!]: {
+                    ...chat,
+                    messages: [...chat.messages, userMsg],
+                    updatedAt: Date.now(),
+                    order: Date.now() // رفع المحادثة للأعلى
+                }
+            };
+        });
+
+        // توليد عنوان للمحادثة إذا كانت جديدة
+        if (isNewChat && content.trim()) {
+            generateChatTitle(content, settings)
+                .then(title => {
+                    if (title) updateChatTitle(chatId!, title);
+                })
+                .catch(err => console.error("Error generating title", err));
+        }
+
+        setIsStreaming(true);
+
+        const assistantMsgId = (Date.now() + 1).toString();
+        
+        try {
+            const chat = chats[chatId!] || { messages: [] };
+            const history = [...chat.messages, userMsg];
+
+            let streamedContent = '';
+            
+            await streamResponse(history, settings, (chunk) => {
+                streamedContent += chunk;
+                setChats(prev => {
+                    const currentChat = prev[chatId!];
+                    if (!currentChat) return prev;
+                    
+                    const msgs = [...currentChat.messages];
+                    const lastMsg = msgs[msgs.length - 1];
+                    
+                    if (lastMsg.role === 'assistant' && lastMsg.id === assistantMsgId) {
+                        lastMsg.content = streamedContent;
+                    } else {
+                        msgs.push({
+                            id: assistantMsgId,
+                            role: 'assistant',
+                            content: streamedContent,
+                            timestamp: Date.now()
+                        });
+                    }
+                    
+                    return {
+                        ...prev,
+                        [chatId!]: { ...currentChat, messages: msgs }
+                    };
+                });
+            });
+
+        } catch (error: any) {
+            setChats(prev => {
+                const currentChat = prev[chatId!];
+                return {
+                    ...prev,
+                    [chatId!]: {
+                        ...currentChat,
+                        messages: [
+                            ...currentChat.messages,
+                            {
+                                id: Date.now().toString(),
+                                role: 'assistant',
+                                content: `⚠️ خطأ: ${error.message || 'حدث خطأ غير متوقع.'}`,
+                                timestamp: Date.now()
+                            }
+                        ]
+                    }
+                };
+            });
+        } finally {
+            setIsStreaming(false);
+        }
+    };
+
+    const handleReorder = (newChatsOrder: Chat[]) => {
+        const newChatsMap: Record<string, Chat> = {};
+        newChatsOrder.forEach((chat, index) => {
+            chat.order = newChatsOrder.length - index;
+            newChatsMap[chat.id] = chat;
+        });
+        setChats(newChatsMap);
+    };
+
+    return (
+        <div className="flex h-screen relative bg-zeus-base text-white font-sans overflow-hidden" dir="rtl">
+            
+            {/* تراكب الموبايل */}
+            {isSidebarOpen && (
+                <div 
+                    className="fixed inset-0 bg-black/50 z-20 md:hidden backdrop-blur-sm"
+                    onClick={() => setIsSidebarOpen(false)}
+                />
+            )}
+
+            {/* القائمة الجانبية */}
+            <div className={`
+                fixed md:relative z-30 h-full transition-all duration-300 ease-in-out
+                ${isSidebarOpen ? 'translate-x-0 w-80' : 'translate-x-full md:translate-x-0 md:w-0 md:opacity-0 md:overflow-hidden'}
+                right-0 border-l border-white/10 bg-zeus-surface shadow-xl
+            `}>
+                <Sidebar 
+                    chats={chats}
+                    currentChatId={currentChatId}
+                    onSelectChat={(id) => {
+                        setCurrentChatId(id);
+                        if (window.innerWidth < 768) setIsSidebarOpen(false);
+                    }}
+                    onNewChat={createNewChat}
+                    onDeleteChat={deleteChat}
+                    onEditTitle={updateChatTitle}
+                    onClose={() => setIsSidebarOpen(false)}
+                    onReorder={handleReorder}
+                />
+            </div>
+
+            {/* منطقة المحادثة الرئيسية */}
+            <div className="flex-1 flex flex-col z-10 relative h-full max-w-full bg-black">
+                {/* الهيدر */}
+                <header className="flex items-center justify-between p-4 border-b border-white/10 bg-zeus-surface">
+                    <div className="flex items-center gap-3">
+                        <button 
+                            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                            className="p-2 text-zeus-gold hover:bg-white/10 rounded-lg transition-colors"
+                        >
+                            <i className="fas fa-bars"></i>
+                        </button>
+                        <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full border border-zeus-gold bg-black flex items-center justify-center text-zeus-gold font-bold">
+                                <i className="fas fa-bolt"></i>
+                            </div>
+                            <div>
+                                <h1 className="font-bold text-lg text-white">
+                                    زيوس <span className="text-xs font-normal text-gray-400">إله الرعد</span>
+                                </h1>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                         <span className="hidden md:inline-block text-xs text-zeus-gold bg-zeus-gold/10 px-3 py-1 rounded-full border border-zeus-gold/20">
+                            {settings.model}
+                        </span>
+                        <button 
+                            onClick={() => setIsSettingsOpen(true)}
+                            className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                            title="الإعدادات"
+                        >
+                            <i className="fas fa-cog fa-lg"></i>
+                        </button>
+                    </div>
+                </header>
+
+                {/* نافذة المحادثة */}
+                <ChatWindow 
+                    chat={currentChatId ? chats[currentChatId] : null}
+                    onSendMessage={handleSendMessage}
+                    isStreaming={isStreaming}
+                />
+            </div>
+
+            {/* مودال الإعدادات */}
+            {isSettingsOpen && (
+                <SettingsModal 
+                    settings={settings}
+                    onSave={setSettings}
+                    onClose={() => setIsSettingsOpen(false)}
+                />
+            )}
+        </div>
+    );
+};
+
+export default App;

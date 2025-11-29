@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>شات زيوس - إله الرعد</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        zeus: {
+                            base: '#000000', // أسود نقي للأداء
+                            surface: '#111111', // رمادي داكن جداً للعناصر
+                            gold: '#FFD700', 
+                            goldDim: '#B8860B',
+                            electric: '#00F3FF',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Tajawal', 'Cairo', 'sans-serif'],
+                        mono: ['Fira Code', 'monospace'],
+                    },
+                    animation: {
+                        'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <style>
+        /* شريط التمرير المخصص */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #000;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #FFD700;
+        }
+        
+        body {
+            background-color: #000000;
+            color: #e0e0e0;
+        }
+
+        /* تحسينات النصوص */
+        .markdown-body {
+            font-family: 'Tajawal', sans-serif;
+            line-height: 1.8;
+            overflow-wrap: break-word;
+            word-wrap: break-word;
+            color: #e0e0e0;
+        }
+
+        /* --- العناوين (Headings) --- */
+        .markdown-body h1 { font-size: 2em; border-bottom: 1px solid #333; padding-bottom: 0.3em; margin-top: 1.5em; margin-bottom: 0.75em; font-weight: 800; color: #fff; }
+        .markdown-body h2 { font-size: 1.5em; border-bottom: 1px solid #333; padding-bottom: 0.3em; margin-top: 1.5em; margin-bottom: 0.75em; font-weight: 700; color: #fff; }
+        .markdown-body h3 { font-size: 1.25em; margin-top: 1.25em; margin-bottom: 0.5em; font-weight: 700; color: #eee; }
+        .markdown-body h4 { font-size: 1em; margin-top: 1em; margin-bottom: 0.5em; font-weight: 700; color: #ddd; }
+        .markdown-body h5 { font-size: 0.875em; font-weight: 700; color: #ccc; }
+        .markdown-body h6 { font-size: 0.85em; color: #aaa; text-transform: uppercase; }
+
+        /* --- الفقرات والقوائم --- */
+        .markdown-body p {
+            margin-bottom: 1rem;
+        }
+        .markdown-body p:last-child {
+            margin-bottom: 0;
+        }
+
+        .markdown-body ul { list-style-type: disc; padding-right: 1.5rem; margin-bottom: 1rem; }
+        .markdown-body ol { list-style-type: decimal; padding-right: 1.5rem; margin-bottom: 1rem; }
+        .markdown-body li { margin-bottom: 0.25rem; }
+
+        /* --- الجداول (Tables) --- */
+        .markdown-body table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1.5rem;
+            background-color: #0d0d0d;
+            border-radius: 8px;
+            overflow: hidden;
+            display: block; /* For horizontal scrolling on small screens if needed */
+            overflow-x: auto;
+        }
+        
+        .markdown-body thead {
+            background-color: #1a1a1a;
+        }
+        
+        .markdown-body th, .markdown-body td {
+            border: 1px solid #333;
+            padding: 10px 14px;
+            text-align: right; /* RTL */
+        }
+        
+        .markdown-body th {
+            font-weight: bold;
+            color: #FFD700;
+            white-space: nowrap;
+        }
+        
+        .markdown-body tr:nth-child(even) {
+            background-color: #111;
+        }
+        
+        .markdown-body tr:hover {
+            background-color: #161616;
+        }
+
+        /* --- اقتباسات (Blockquotes) --- */
+        .markdown-body blockquote {
+            border-right: 4px solid #FFD700;
+            padding: 0.5rem 1rem;
+            color: #bbb;
+            margin: 1rem 0;
+            background: rgba(255, 215, 0, 0.05);
+            border-radius: 4px;
+        }
+        
+        .markdown-body blockquote p:last-child {
+            margin-bottom: 0;
+        }
+
+        /* --- خط فاصل (Horizontal Rule) --- */
+        .markdown-body hr {
+            height: 1px;
+            padding: 0;
+            margin: 2rem 0;
+            background-color: #333;
+            border: 0;
+        }
+
+        /* --- روابط --- */
+        .markdown-body a {
+            color: #FFD700;
+            text-decoration: none;
+            border-bottom: 1px dashed #FFD700;
+            transition: all 0.2s;
+        }
+        
+        .markdown-body a:hover {
+            color: #fff;
+            border-bottom-style: solid;
+        }
+        
+        .markdown-body strong {
+            color: #fff;
+            font-weight: 800;
+        }
+        
+        .markdown-body em {
+            color: #ddd;
+            font-style: italic;
+        }
+
+        /* --- كود --- */
+        .code-block-wrapper {
+            margin: 1.5rem 0;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #333;
+            background: #0d0d0d;
+            direction: ltr !important;
+            text-align: left !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .code-block-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 16px;
+            background: #1a1a1a;
+            border-bottom: 1px solid #333;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.8rem;
+            color: #FFD700;
+            direction: ltr;
+        }
+
+        .code-block-header button {
+            color: #888;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        .code-block-header button:hover {
+            color: #FFD700;
+        }
+
+        .markdown-body pre {
+            margin: 0 !important;
+            padding: 16px !important;
+            background: transparent !important;
+            overflow-x: auto;
+            border: none;
+            direction: ltr !important;
+            text-align: left !important;
+        }
+
+        .markdown-body code {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.9em;
+            direction: ltr;
+        }
+        
+        .markdown-body :not(pre) > code {
+            background: rgba(255, 215, 0, 0.1);
+            color: #FFD700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            direction: ltr;
+            display: inline-block;
+            border: 1px solid rgba(255, 215, 0, 0.2);
+        }
+
+        /* --- ZEUS CURSOR STYLES --- */
+        @keyframes zeus-flicker {
+            0% { opacity: 1; text-shadow: 0 0 4px #FFD700; transform: scale(1); filter: brightness(1); }
+            10% { opacity: 0.8; text-shadow: 0 0 0px #FFD700; transform: scale(0.95); }
+            15% { opacity: 1; text-shadow: 0 0 10px #FFD700, 0 0 20px #FFA500; transform: scale(1.1); filter: brightness(1.5); }
+            20% { opacity: 1; text-shadow: 0 0 4px #FFD700; }
+            40% { opacity: 0.4; }
+            50% { opacity: 1; text-shadow: 0 0 15px #FFD700; }
+            100% { opacity: 1; text-shadow: 0 0 4px #FFD700; }
+        }
+
+        .zeus-cursor-inline {
+            display: inline-block;
+            font-style: normal;
+            margin-right: 2px;
+            margin-left: 2px;
+            animation: zeus-flicker 1.2s infinite;
+            color: #FFD700;
+            font-weight: bold;
+            vertical-align: baseline;
+            line-height: 1;
+        }
+        
+        .zeus-cursor-inline::after {
+            content: '⚡';
+            font-size: 1.2em;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "highlight.js": "https://aistudiocdn.com/highlight.js@^11.11.1",
+    "marked": "https://aistudiocdn.com/marked@^17.0.1",
+    "path": "https://aistudiocdn.com/path@^0.12.7",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "vite": "https://aistudiocdn.com/vite@^7.2.4"
+  }
+}
+</script>
+<script>
+    window.copyCode = function(btn, code) {
+        const txt = document.createElement("textarea");
+        txt.innerHTML = code;
+        const decodedCode = txt.value;
+
+        navigator.clipboard.writeText(decodedCode).then(() => {
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-check"></i> تم النسخ';
+            btn.classList.add('text-green-500');
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.classList.remove('text-green-500');
+            }, 2000);
+        }).catch(err => {
+            console.error('Failed to copy', err);
+        });
+    }
+</script>
+</head>
+<body class="bg-black text-gray-100 min-h-screen overflow-hidden font-sans">
+    <div id="root"></div>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
