@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Settings, Chat, Message, Attachment } from './types';
 import { streamResponse, generateChatTitle } from './services/ai';
@@ -9,7 +8,7 @@ import { DeleteModal, RenameModal } from './components/ActionModals';
 
 const defaultSettings: Settings = {
     provider: 'gemini',
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.5-flash',
     temperature: 0.7,
     geminiApiKeys: [],
     openrouterApiKeys: [],

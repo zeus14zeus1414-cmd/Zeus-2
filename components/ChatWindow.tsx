@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect, useState, useMemo, useLayoutEffect } from 'react';
 import { Chat, Attachment, Message } from '../types';
 import { marked } from 'marked';
