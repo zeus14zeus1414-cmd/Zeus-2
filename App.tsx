@@ -16,7 +16,8 @@ const defaultSettings: Settings = {
     customModels: [],
     customPrompt: '',
     apiKeyRetryStrategy: 'sequential',
-    fontSize: 18
+    fontSize: 18,
+    thinkingBudget: 0 // الافتراضي 0 (معطل)
 };
 
 const App: React.FC = () => {
@@ -45,11 +46,15 @@ const App: React.FC = () => {
         }
     }, []);
 
-    // حفظ البيانات
+    // حفظ البيانات - Debounced
     useEffect(() => {
-        localStorage.setItem('zeusChats', JSON.stringify(chats));
-        localStorage.setItem('zeusSettings', JSON.stringify(settings));
-        if (currentChatId) localStorage.setItem('zeusCurrentChatId', currentChatId);
+        const handler = setTimeout(() => {
+            localStorage.setItem('zeusChats', JSON.stringify(chats));
+            localStorage.setItem('zeusSettings', JSON.stringify(settings));
+            if (currentChatId) localStorage.setItem('zeusCurrentChatId', currentChatId);
+        }, 1000); // تأخير ثانية واحدة لتجنب تجميد الواجهة
+
+        return () => clearTimeout(handler);
     }, [chats, settings, currentChatId]);
 
     // تطبيق حجم الخط
@@ -118,7 +123,7 @@ const App: React.FC = () => {
         }));
     };
 
-    const handleSendMessage = async (content: string, attachments: Attachment[]) => {
+    const handleSendMessage = async (content: string, attachments: Attachment[], forceThink: boolean = false) => {
         if (!content.trim() && attachments.length === 0) return;
         
         let chatId = currentChatId;
@@ -146,6 +151,7 @@ const App: React.FC = () => {
             timestamp: Date.now()
         };
 
+        // 1. إضافة رسالة المستخدم
         setChats(prev => {
             const chat = prev[chatId!];
             return {
@@ -171,30 +177,54 @@ const App: React.FC = () => {
 
         const assistantMsgId = (Date.now() + 1).toString();
         
+        // 2. إضافة رسالة المساعد الفارغة فوراً (Placeholder) ليظهر المؤشر داخل الفقاعة
+        setChats(prev => {
+            const chat = prev[chatId!];
+            return {
+                ...prev,
+                [chatId!]: {
+                    ...chat,
+                    messages: [
+                        ...chat.messages, 
+                        {
+                            id: assistantMsgId,
+                            role: 'assistant',
+                            content: '', // محتوى فارغ في البداية
+                            timestamp: Date.now()
+                        }
+                    ]
+                }
+            };
+        });
+
         try {
             const chat = chats[chatId!] || { messages: [] };
-            const history = [...chat.messages, userMsg];
+            const history = [...chat.messages, userMsg]; 
 
             let streamedContent = '';
             
-            await streamResponse(history, settings, (chunk) => {
+            // إعدادات وقت التشغيل: إذا تم طلب التفكير الإجباري، نرفع الميزانية إلى 4096 لضمان التفكير العميق
+            const runSettings = {
+                ...settings,
+                thinkingBudget: forceThink ? Math.max(settings.thinkingBudget || 0, 4096) : settings.thinkingBudget
+            };
+            
+            await streamResponse(history, runSettings, (chunk) => {
                 streamedContent += chunk;
+                
+                // تحديث محتوى الرسالة الموجودة بالفعل
                 setChats(prev => {
                     const currentChat = prev[chatId!];
                     if (!currentChat) return prev;
                     
                     const msgs = [...currentChat.messages];
-                    const lastMsg = msgs[msgs.length - 1];
+                    const lastMsgIndex = msgs.findIndex(m => m.id === assistantMsgId);
                     
-                    if (lastMsg.role === 'assistant' && lastMsg.id === assistantMsgId) {
-                        lastMsg.content = streamedContent;
-                    } else {
-                        msgs.push({
-                            id: assistantMsgId,
-                            role: 'assistant',
-                            content: streamedContent,
-                            timestamp: Date.now()
-                        });
+                    if (lastMsgIndex !== -1) {
+                        msgs[lastMsgIndex] = {
+                            ...msgs[lastMsgIndex],
+                            content: streamedContent
+                        };
                     }
                     
                     return {
@@ -207,20 +237,20 @@ const App: React.FC = () => {
         } catch (error: any) {
             setChats(prev => {
                 const currentChat = prev[chatId!];
+                // تحديث الرسالة لتعرض الخطأ
+                const msgs = [...currentChat.messages];
+                const lastMsgIndex = msgs.findIndex(m => m.id === assistantMsgId);
+                
+                if (lastMsgIndex !== -1) {
+                     msgs[lastMsgIndex] = {
+                        ...msgs[lastMsgIndex],
+                        content: `⚠️ خطأ: ${error.message || 'حدث خطأ غير متوقع.'}`
+                    };
+                }
+
                 return {
                     ...prev,
-                    [chatId!]: {
-                        ...currentChat,
-                        messages: [
-                            ...currentChat.messages,
-                            {
-                                id: Date.now().toString(),
-                                role: 'assistant',
-                                content: `⚠️ خطأ: ${error.message || 'حدث خطأ غير متوقع.'}`,
-                                timestamp: Date.now()
-                            }
-                        ]
-                    }
+                    [chatId!]: { ...currentChat, messages: msgs }
                 };
             });
         } finally {
@@ -238,7 +268,6 @@ const App: React.FC = () => {
     };
 
     return (
-        // Changed from fixed to relative with h-[100dvh] to fix PWA freezing
         <div className="relative flex flex-col h-[100dvh] w-full bg-zeus-base text-white font-sans overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" dir="rtl">
             
             {/* تراكب الموبايل */}

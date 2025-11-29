@@ -5,7 +5,7 @@ import hljs from 'highlight.js';
 
 interface Props {
     chat: Chat | null;
-    onSendMessage: (text: string, files: Attachment[]) => void;
+    onSendMessage: (text: string, files: Attachment[], forceThink: boolean) => void;
     isStreaming: boolean;
     onNewChat: () => void;
 }
@@ -20,18 +20,47 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
     const isUser = msg.role === 'user';
     const [isExpanded, setIsExpanded] = useState(false);
     
-    // حساب ما إذا كانت الرسالة طويلة جداً وتستحق الطي
+    // حالة توسيع قسم التفكير
+    const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
+    
+    // تحليل المحتوى لاستخراج التفكير (ما بين <think>)
+    const parsedContent = useMemo(() => {
+        const rawContent = msg.content || '';
+        
+        // Regex لاستخراج ما بين <think> و </think>
+        // نستخدم [\s\S]*? لدعم الأسطر المتعددة
+        const thinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/);
+        
+        let thinkContent = '';
+        let finalAnswer = rawContent;
+
+        if (thinkMatch) {
+            thinkContent = thinkMatch[1].trim();
+            finalAnswer = rawContent.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+        } else if (isLast && isStreaming && !isUser && rawContent.includes('<think>')) {
+             // حالة خاصة أثناء البث: قد يكون التاج مفتوحاً ولم يغلق بعد
+             const parts = rawContent.split('<think>');
+             if (parts.length > 1) {
+                 thinkContent = parts[1].trim(); // اعتبر كل ما بعد الفتح تفكيراً مؤقتاً
+                 finalAnswer = parts[0].trim();
+             }
+        }
+
+        return { thinkContent, finalAnswer };
+    }, [msg.content, isLast, isStreaming, isUser]);
+
+    const { thinkContent, finalAnswer } = parsedContent;
+
+    // حساب ما إذا كانت الرسالة (الجواب النهائي) طويلة جداً وتستحق الطي
     const shouldCollapse = useMemo(() => {
         if (isLast && isStreaming && !isUser) return false;
 
-        const content = msg.content || '';
-        const lines = content.split('\n').length;
-        
-        return content.length > MAX_COLLAPSED_LENGTH || lines > MAX_COLLAPSED_LINES;
-    }, [msg.content, isLast, isStreaming, isUser]);
+        const lines = finalAnswer.split('\n').length;
+        return finalAnswer.length > MAX_COLLAPSED_LENGTH || lines > MAX_COLLAPSED_LINES;
+    }, [finalAnswer, isLast, isStreaming, isUser]);
 
     const htmlContent = useMemo(() => {
-        let content = msg.content || ' ';
+        let content = finalAnswer || ' '; // إذا كان فارغاً (بداية التوليد)، نضع مسافة للحفاظ على الهيكل
         
         if (shouldCollapse && !isExpanded) {
             const snippet = content.slice(0, MAX_COLLAPSED_LENGTH);
@@ -43,7 +72,14 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
         }
         
         return marked.parse(content) as string;
-    }, [msg.content, isLast, isStreaming, isUser, shouldCollapse, isExpanded]);
+    }, [finalAnswer, isLast, isStreaming, isUser, shouldCollapse, isExpanded]);
+
+    // تحديد حالة "التحميل" أو "الانتظار" لرسالة المساعد
+    // إذا كانت آخر رسالة + وضع البث + لم يكتمل الجواب بعد (أو فارغ)
+    const isProcessing = !isUser && isLast && isStreaming;
+    
+    // إخفاء الجسم إذا لم يكن هناك إجابة نهائية بعد (أو تفكير)، لمنع ظهور المؤشر المزدوج
+    const showBody = isUser || finalAnswer.length > 0;
 
     return (
         <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} group animate-fade-in`}>
@@ -54,10 +90,60 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
                     : 'bg-black/60 border border-zeus-gold/30 text-gray-100 rounded-tr-sm shadow-[0_0_20px_rgba(255,215,0,0.05)]'
                 }
             `}>
-                <div className="text-xs mb-3 opacity-70 flex items-center gap-2 border-b border-white/5 pb-2">
-                    <i className={`fas ${isUser ? 'fa-user text-blue-400' : 'fa-bolt text-zeus-gold'}`}></i>
-                    <span className="font-bold text-zeus-goldDim">{isUser ? 'أنت' : 'زيوس'}</span>
-                </div>
+                {!isUser && (
+                    <>
+                        {/* --- Deep Thinking Header & Logic --- */}
+                        {/* يظهر دائماً للمساعد، سواء كان يفكر أو انتهى */}
+                        <div 
+                            className={`flex items-center gap-3 mb-3 pb-3 border-b border-zeus-gold/10 transition-all duration-300 ${!isProcessing ? 'cursor-pointer hover:bg-white/5 rounded-lg -mx-2 px-2' : ''}`}
+                            onClick={() => !isProcessing && setIsThinkingExpanded(!isThinkingExpanded)}
+                        >
+                             <div className="relative w-6 h-6 flex items-center justify-center flex-shrink-0">
+                                {isProcessing ? (
+                                    /* Loader Animation (Snake) */
+                                    <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50">
+                                        <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="animate-dash-flow" strokeDasharray="28 6 28 6 28 30" />
+                                    </svg>
+                                ) : (
+                                    /* Static Completed Circle */
+                                    <div className="w-full h-full rounded-full border-2 border-zeus-gold shadow-[0_0_10px_rgba(255,215,0,0.5)]"></div>
+                                )}
+                                {/* Lightning Icon */}
+                                <i className="fas fa-bolt text-[10px] text-zeus-gold absolute"></i>
+                             </div>
+
+                             <div className="flex flex-col">
+                                <span className={`text-sm font-bold transition-all ${isProcessing ? 'text-zeus-gold animate-pulse' : 'text-gray-300'}`}>
+                                    {isProcessing ? 'لحظة من فضلك...' : 'عرض طريقة التفكير'}
+                                </span>
+                             </div>
+
+                             {!isProcessing && (
+                                 <i className={`fas fa-chevron-down text-xs text-gray-500 mr-auto transition-transform duration-300 ${isThinkingExpanded ? 'rotate-180' : ''}`}></i>
+                             )}
+                        </div>
+
+                        {/* --- Thinking Content (Collapsible) --- */}
+                        {isThinkingExpanded && thinkContent && (
+                            <div className="mb-4 pl-4 border-r-2 border-zeus-gold/20 animate-slide-up">
+                                <div className="text-xs text-gray-400 font-mono whitespace-pre-wrap leading-relaxed opacity-80" style={{ fontSize: '0.7em' }}>
+                                    {thinkContent}
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* فاصل ذهبي خفيف بين الهيدر والجواب إذا لم يكن هناك تفكير ظاهر */}
+                        {!isThinkingExpanded && !isProcessing && <div className="h-px w-full bg-zeus-gold/10 mb-3"></div>}
+                    </>
+                )}
+
+                {/* --- Main Content Header (User Name) --- */}
+                {isUser && (
+                    <div className="text-xs mb-3 opacity-70 flex items-center gap-2 border-b border-white/5 pb-2">
+                        <i className="fas fa-user text-blue-400"></i>
+                        <span className="font-bold text-zeus-goldDim">أنت</span>
+                    </div>
+                )}
 
                 {msg.attachments && msg.attachments.length > 0 && (
                     <div className="flex flex-wrap gap-2 mb-4 justify-end">
@@ -78,11 +164,15 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
                     </div>
                 )}
 
-                <div 
-                    className={`markdown-body leading-relaxed min-w-0 break-words ${shouldCollapse && !isExpanded ? 'mask-bottom' : ''}`}
-                    style={{ fontSize: 'var(--message-font-size)' }}
-                    dangerouslySetInnerHTML={{ __html: htmlContent }}
-                />
+                {/* --- Main Message Body --- */}
+                {/* يظهر فقط إذا كان هناك محتوى فعلي، لمنع المؤشرات المزدوجة أثناء الانتظار */}
+                {showBody && (
+                    <div 
+                        className={`markdown-body leading-relaxed min-w-0 break-words ${shouldCollapse && !isExpanded ? 'mask-bottom' : ''}`}
+                        style={{ fontSize: 'var(--message-font-size)' }}
+                        dangerouslySetInnerHTML={{ __html: htmlContent }}
+                    />
+                )}
 
                 {shouldCollapse && (
                     <button 
@@ -95,7 +185,7 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
                             </>
                         ) : (
                             <>
-                                <i className="fas fa-chevron-down"></i> إظهار باقي الرسالة ({msg.content.length.toLocaleString()} حرف)
+                                <i className="fas fa-chevron-down"></i> إظهار باقي الرسالة ({finalAnswer.length.toLocaleString()} حرف)
                             </>
                         )}
                     </button>
@@ -109,9 +199,9 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
                     </span>
                     
                     {/* زر النسخ: ظاهر دائماً */}
-                    {msg.content && (
+                    {finalAnswer && (
                         <button 
-                            onClick={() => navigator.clipboard.writeText(msg.content)}
+                            onClick={() => navigator.clipboard.writeText(finalAnswer)}
                             className="text-gray-500 hover:text-zeus-gold transition-colors p-1 opacity-70 hover:opacity-100"
                             title="Copy"
                         >
@@ -136,6 +226,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const [inputValue, setInputValue] = useState('');
     const [textDirection, setTextDirection] = useState<'rtl' | 'ltr'>('rtl'); // الحالة الافتراضية RTL
     const [attachments, setAttachments] = useState<Attachment[]>([]);
+    const [isThinkingEnabled, setIsThinkingEnabled] = useState(false); // زر التفكير
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [showScrollButton, setShowScrollButton] = useState(false);
@@ -169,7 +260,6 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         isAtBottomRef.current = true; // إعادة تعيين الحالة للأسفل
         
         // إجبار التمرير للأسفل فوراً عند فتح محادثة جديدة
-        // استخدام setTimeout لضمان اكتمال الـ render
         setTimeout(() => {
             scrollToBottom('instant');
         }, 50); 
@@ -228,22 +318,14 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     }, [visibleCount]);
 
     // التمرير التلقائي الذكي أثناء البث
-    // نعتمد على طول محتوى آخر رسالة لتفعيل التمرير مع كل حرف جديد
     const lastMessage = displayedMessages[displayedMessages.length - 1];
     const lastMessageContentLength = lastMessage?.content?.length || 0;
 
     useEffect(() => {
-        // نمرر للأسفل فقط إذا:
-        // 1. نحن في وضع البث (أو رسالة جديدة وصلت للتو)
-        // 2. لم نكن نحمل التاريخ القديم
-        // 3. المستخدم كان بالفعل في أسفل الصفحة (لم يصعد للأعلى للقراءة)
         if (!isLoadingHistory && isAtBottomRef.current) {
              scrollToBottom('smooth');
         }
     }, [lastMessageContentLength, isStreaming, isLoadingHistory, displayedMessages.length]);
-
-    // تحديد ما إذا كنا ننتظر الرد الأول
-    const isWaitingForFirstChunk = isStreaming && chat && chat.messages.length > 0 && chat.messages[chat.messages.length - 1].role === 'user';
 
     const adjustTextareaHeight = () => {
         const textarea = textareaRef.current;
@@ -342,8 +424,6 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         const val = e.target.value;
         setInputValue(val);
 
-        // التحقق من الحرف الأول لتحديد الاتجاه
-        // إذا كان يبدأ بحرف إنجليزي -> يسار، عدا ذلك -> يمين (افتراضي)
         if (val.trim().length > 0) {
             const firstChar = val.trim().charAt(0);
             if (/^[A-Za-z]/.test(firstChar)) {
@@ -352,7 +432,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                 setTextDirection('rtl');
             }
         } else {
-            setTextDirection('rtl'); // عودة للأصل إذا كان فارغاً
+            setTextDirection('rtl');
         }
     };
 
@@ -360,16 +440,16 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         if (!inputValue.trim() && attachments.length === 0) return;
         if (isStreaming) return;
         
-        onSendMessage(inputValue, attachments);
+        onSendMessage(inputValue, attachments, isThinkingEnabled);
         setInputValue('');
-        setTextDirection('rtl'); // إعادة الاتجاه لليمين بعد الإرسال
+        setTextDirection('rtl');
         setAttachments([]);
+        setIsThinkingEnabled(false); // إعادة تعيين بعد الإرسال
         
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
         }
         
-        // عند الإرسال، نجبر الشاشة على النزول للأسفل وتفعيل المتابعة التلقائية
         isAtBottomRef.current = true;
         setTimeout(() => scrollToBottom('smooth'), 100);
     };
@@ -426,7 +506,6 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                     </div>
                 )}
                 
-                {/* رسالة توضيحية عند وجود تاريخ مخفي */}
                 {hasMoreHistory && !isLoadingHistory && (
                     <div className="text-center py-2 opacity-50 text-xs text-gray-500 cursor-pointer hover:text-zeus-gold" onClick={() => {
                         const fakeEvent = { currentTarget: containerRef.current } as any;
@@ -445,41 +524,6 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                         isStreaming={isStreaming} 
                     />
                 ))}
-
-                {/* مؤشر التحميل المخصص الجديد (Zeus Loader) */}
-                {isWaitingForFirstChunk && (
-                    <div className="flex justify-start animate-fade-in p-2">
-                        <div className="bg-black/80 border border-zeus-gold/20 rounded-2xl py-3 px-5 flex items-center gap-3 shadow-[0_0_20px_rgba(255,215,0,0.05)]">
-                             {/* الأيقونة والحلقة */}
-                             <div className="relative w-10 h-10 flex items-center justify-center">
-                                {/* الحلقة الدوارة المكونة من قطاعات تتحرك كالثعبان */}
-                                {/* تم إلغاء دوران SVG، واستخدام animate-dash-flow على الدائرة لتحريك الإزاحة */}
-                                <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50">
-                                    <circle
-                                        cx="25"
-                                        cy="25"
-                                        r="20"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="3"
-                                        strokeLinecap="round"
-                                        className="animate-dash-flow"
-                                        /* 
-                                           تم حساب المحيط ليكون تقريباً 126
-                                           النمط: 3 عواميد (28) + فراغات صغيرة (6) + فراغ كبير (30) 
-                                           28+6+28+6+28+30 = 126
-                                        */
-                                        strokeDasharray="28 6 28 6 28 30"
-                                    />
-                                </svg>
-                                {/* أيقونة البرق الثابتة */}
-                                <i className="fas fa-bolt text-zeus-gold text-lg drop-shadow-[0_0_5px_rgba(255,215,0,0.8)]"></i>
-                             </div>
-                             {/* النص النابض - أكبر وأقرب */}
-                             <span className="text-zeus-gold/90 text-base font-bold animate-pulse-fast select-none">لحظة من فضلك...</span>
-                        </div>
-                    </div>
-                )}
                 
                 <div ref={messagesEndRef} />
             </div>
@@ -487,7 +531,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
             {/* منطقة الإدخال */}
             <div className="p-4 bg-black/40 backdrop-blur-md border-t border-zeus-gold/20 z-10 relative">
                 
-                 {/* زر العودة للأسفل - متمركز فوق الإدخال تماماً ومتجاوب */}
+                 {/* زر العودة للأسفل */}
                 {showScrollButton && (
                     <button 
                         onClick={() => scrollToBottom('smooth')}
@@ -518,7 +562,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                     </div>
                 )}
 
-                {/* شريط الإدخال المتجاوب الجديد - تم إعادة الحدود للشفافية الذهبية */}
+                {/* شريط الإدخال */}
                 <div className="relative flex items-end bg-black/60 border border-zeus-gold/30 rounded-2xl shadow-[0_0_15px_rgba(255,215,0,0.05)] transition-all focus-within:shadow-[0_0_20px_rgba(255,215,0,0.1)] overflow-hidden">
                     
                     {/* زر المرفقات */}
@@ -537,13 +581,22 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                         onChange={handleFileSelect}
                     />
 
+                    {/* زر التفكير الإجباري */}
+                    <button 
+                        onClick={() => setIsThinkingEnabled(!isThinkingEnabled)}
+                        className={`h-11 w-11 md:h-14 md:w-14 transition-colors flex-shrink-0 flex items-center justify-center border-l border-zeus-gold/30 ${isThinkingEnabled ? 'text-zeus-gold bg-zeus-gold/10' : 'text-gray-400 hover:text-zeus-gold hover:bg-white/5'}`}
+                        title="إجبار النموذج على التفكير العميق"
+                    >
+                        <i className={`fas fa-brain text-lg md:text-xl ${isThinkingEnabled ? 'animate-pulse' : ''}`}></i>
+                    </button>
+
                     {/* حقل النص */}
                     <textarea
                         ref={textareaRef}
                         value={inputValue}
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
-                        placeholder="اسأل أي شيء..."
+                        placeholder={isThinkingEnabled ? "اسأل بعمق... (وضع التفكير مفعل)" : "اسأل أي شيء..."}
                         dir={textDirection}
                         className="flex-1 bg-transparent border-none outline-none text-white resize-none py-3 px-3 md:py-4 md:px-4 placeholder-gray-500 font-sans text-sm md:text-lg scrollbar-thin"
                         style={{ height: 'auto', maxHeight: '200px', overflowY: 'hidden' }}

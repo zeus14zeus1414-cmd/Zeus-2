@@ -56,4 +56,5 @@ export interface Settings {
     customPrompt: string;
     apiKeyRetryStrategy: 'sequential' | 'round-robin';
     fontSize: number;
+    thinkingBudget: number; // ميزانية التفكير
 }

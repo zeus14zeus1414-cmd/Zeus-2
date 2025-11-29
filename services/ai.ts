@@ -5,8 +5,8 @@ export const AI_MODELS = {
         { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
         { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
         { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
-        { id: 'gemini-2.0-flash-lite-preview', name: 'Gemini 2.0 Flash Lite' },
-        { id: 'gemini-3-pro-preview', name: 'Gemini 3 pro' },
+        { id: 'gemini-2.0-flash-lite-preview-02-05', name: 'Gemini 2.0 Flash Lite' },
+        { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Preview)' },
     ],
     openrouter: [
         { id: 'google/gemma-2-9b-it:free', name: 'Gemma 2 9B (مجاني)' },
@@ -15,6 +15,21 @@ export const AI_MODELS = {
         { id: 'qwen/qwen-2.5-coder-32b-instruct', name: 'Qwen 2.5 Coder' },
     ]
 };
+
+// تعليمة صارمة لإجبار النموذج على إخراج التفكير بصيغة قابلة للتحليل
+const THINKING_SYSTEM_INSTRUCTION = `
+IMPORTANT: You are currently in "Deep Thinking Mode".
+1. Before answering, you MUST engage in a comprehensive, step-by-step reasoning process.
+2. You MUST enclose your internal monologue and reasoning process strictly within <think> and </think> tags.
+3. The content inside <think> tags will be displayed to the user as your "thought process".
+4. After the closing </think> tag, provide your final, polished answer to the user.
+5. Do NOT be lazy. Analyze the request deeply.
+Format your response exactly like this:
+<think>
+[Your deep reasoning, analysis, and step-by-step deduction goes here...]
+</think>
+[Your final answer goes here]
+`;
 
 export const streamResponse = async (
     messages: Message[], 
@@ -41,17 +56,11 @@ export const streamResponse = async (
 // دالة جديدة لتوليد العنوان
 export const generateChatTitle = async (firstMessage: string, settings: Settings): Promise<string> => {
     try {
-        // نستخدم نفس المزود الحالي للمستخدم ولكن نحاول طلب نموذج سريع ومختصر
         const prompt = `لخص الرسالة التالية في عنوان قصير جداً (3-5 كلمات كحد أقصى) للمحادثة. العنوان فقط بدون أي مقدمات أو علامات تنصيص.\nالرسالة: ${firstMessage}`;
-        
-        // إعدادات مؤقتة للعنوان
         const titleSettings = { ...settings, temperature: 0.5 };
         
-        // إذا كان المزود هو Gemini، نستخدم Flash Lite للسرعة إذا كان متاحاً
         if (settings.provider === 'gemini') {
-            titleSettings.model = 'gemini-2.0-flash-lite-preview-02-05'; // استخدام النموذج السريع للعناوين
-            
-            // محاولة استخدام المفتاح النشط
+            titleSettings.model = 'gemini-2.0-flash-lite-preview-02-05'; 
             const apiKey = getActiveKey(settings.geminiApiKeys);
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${titleSettings.model}:generateContent?key=${apiKey}`;
             
@@ -69,8 +78,6 @@ export const generateChatTitle = async (firstMessage: string, settings: Settings
             }
         }
         
-        // إذا لم ينجح Gemini الخاص أو كان المزود مختلف، نستخدم دالة الستريم العادية (لكن بدون ستريم فعلي، فقط نأخذ النتيجة)
-        // سننشئ مصفوفة رسائل وهمية
         const dummyMessages: Message[] = [{
             id: 'title-gen', role: 'user', content: prompt, timestamp: Date.now()
         }];
@@ -93,6 +100,7 @@ const getActiveKey = (keys: { key: string; status: string }[]) => {
 
 const streamGemini = async (messages: Message[], settings: Settings, onChunk: (chunk: string) => void): Promise<string> => {
     const apiKey = getActiveKey(settings.geminiApiKeys);
+    // نستخدم الإصدار v1alpha لدعم بعض الميزات التجريبية إذا لزم الأمر، لكن v1beta مستقر أكثر
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:streamGenerateContent?key=${apiKey}&alt=sse`;
 
     const contents = messages.map(msg => {
@@ -113,21 +121,41 @@ const streamGemini = async (messages: Message[], settings: Settings, onChunk: (c
         return { role: 'model', parts: [{ text: msg.content }] };
     });
 
-    if (settings.customPrompt) {
-        contents.unshift({ role: 'user', parts: [{ text: settings.customPrompt }] });
-        contents.unshift({ role: 'model', parts: [{ text: 'حسناً، فهمت التعليمات.' }] });
+    // دمج تعليمات النظام
+    let systemInstructionText = settings.customPrompt || "";
+    
+    // إذا كانت ميزانية التفكير مفعلة، نحقن التعليمات الصارمة
+    if (settings.thinkingBudget > 0) {
+        systemInstructionText = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemInstructionText}`;
+    }
+
+    // بناء إعدادات التوليد
+    const generationConfig: any = {
+        temperature: settings.temperature,
+        maxOutputTokens: 8192
+    };
+
+    // إضافة إعدادات التفكير الرسمية لـ Gemini (للنماذج التي تدعمها)
+    if (settings.thinkingBudget > 0) {
+        generationConfig.thinkingConfig = { thinkingBudget: settings.thinkingBudget };
+    }
+
+    const requestBody: any = {
+        contents,
+        generationConfig
+    };
+
+    // إضافة systemInstruction فقط إذا كان هناك نص
+    if (systemInstructionText.trim()) {
+        requestBody.systemInstruction = {
+            parts: [{ text: systemInstructionText }]
+        };
     }
 
     const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            contents,
-            generationConfig: {
-                temperature: settings.temperature,
-                maxOutputTokens: 8192
-            }
-        })
+        body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
@@ -146,12 +174,9 @@ const streamGemini = async (messages: Message[], settings: Settings, onChunk: (c
         const { done, value } = await reader.read();
         if (done) break;
         
-        // Use stream: true to handle multi-byte characters split across chunks
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
         const lines = buffer.split('\n');
-        
-        // Keep the last line in the buffer as it might be incomplete
         buffer = lines.pop() || '';
         
         for (const line of lines) {
@@ -165,7 +190,7 @@ const streamGemini = async (messages: Message[], settings: Settings, onChunk: (c
                         onChunk(text);
                     }
                 } catch (e) {
-                    // تجاهل أخطاء التحليل الجزئية
+                    // تجاهل
                 }
             }
         }
@@ -186,8 +211,25 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
         return { role: m.role, content };
     });
 
-    if (settings.customPrompt) {
-        formattedMessages.unshift({ role: 'system', content: settings.customPrompt });
+    // إعداد رسالة النظام
+    let systemContent = settings.customPrompt || "";
+    
+    // حقن تعليمات التفكير لـ OpenRouter
+    if (settings.thinkingBudget > 0) {
+        systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
+    }
+
+    // إضافة رسالة النظام في البداية
+    if (systemContent.trim()) {
+        formattedMessages.unshift({ role: 'system', content: systemContent });
+    }
+
+    // إعدادات خاصة لبعض النماذج في OpenRouter التي تدعم التفكير
+    const extraBody: any = {};
+    if (settings.thinkingBudget > 0 && settings.model.includes('deepseek-r1')) {
+        // DeepSeek R1 أحياناً يحتاج إعدادات خاصة، لكن غالباً التعليمات تكفي
+        // include_reasoning هو بارامتر محتمل في بعض مزودي OpenRouter
+        extraBody.include_reasoning = true;
     }
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -202,7 +244,8 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
             model: settings.model,
             messages: formattedMessages,
             temperature: settings.temperature,
-            stream: true
+            stream: true,
+            ...extraBody
         })
     });
 
@@ -231,7 +274,8 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
                 if(dataStr === '[DONE]') break;
                 try {
                     const data = JSON.parse(dataStr);
-                    const content = data.choices[0]?.delta?.content || '';
+                    // OpenRouter أحياناً يرسل التفكير في حقل خاص أو داخل المحتوى
+                    const content = data.choices[0]?.delta?.content || data.choices[0]?.delta?.reasoning || '';
                     if(content) {
                         fullText += content;
                         onChunk(content);
@@ -247,7 +291,6 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
     const apiKey = provider.apiKeys.find((k:any) => k.status === 'active')?.key;
     if(!apiKey) throw new Error("لا يوجد مفتاح نشط للمزود المخصص");
 
-    // تحضير الرسائل بتنسيق OpenAI القياسي
     const formattedMessages = messages.map(m => {
         let content = m.content;
         if(m.attachments?.length) {
@@ -258,12 +301,16 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
         return { role: m.role, content };
     });
 
-    if (settings.customPrompt) {
-        formattedMessages.unshift({ role: 'system', content: settings.customPrompt });
+    let systemContent = settings.customPrompt || "";
+    if (settings.thinkingBudget > 0) {
+        systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
     }
 
-    // افتراض أن المزود المخصص يدعم واجهة OpenAI
-    const url = `${provider.baseUrl}/chat/completions`.replace('//chat', '/chat'); // simple sanitization
+    if (systemContent.trim()) {
+        formattedMessages.unshift({ role: 'system', content: systemContent });
+    }
+
+    const url = `${provider.baseUrl}/chat/completions`.replace('//chat', '/chat');
 
     try {
         const response = await fetch(url, {
@@ -276,7 +323,7 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
                 model: settings.model,
                 messages: formattedMessages,
                 temperature: settings.temperature,
-                stream: false // للتبسيط في المزود المخصص في هذه النسخة، نستخدم الاستجابة الكاملة ثم نحاكي التدفق
+                stream: false 
             })
         });
 
@@ -285,11 +332,10 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
         const data = await response.json();
         const text = data.choices?.[0]?.message?.content || "";
         
-        // محاكاة التدفق لأننا لم نستخدم stream: true هنا لتجنب تعقيدات الـ parsing المختلفة
         const words = text.split(' ');
         for(let i=0; i<words.length; i++) {
             onChunk(words[i] + ' ');
-            await new Promise(r => setTimeout(r, 20)); // تأخير بسيط للمحاكاة
+            await new Promise(r => setTimeout(r, 20)); 
         }
         return text;
 

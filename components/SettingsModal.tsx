@@ -318,6 +318,34 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                                     className="w-full accent-zeus-gold h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                 />
                             </div>
+
+                            <div className="space-y-2 border-t border-white/5 pt-4">
+                                <label className="text-sm font-bold text-gray-300 flex justify-between items-center mb-1">
+                                    <span className="flex items-center gap-2">
+                                        <i className="fas fa-brain text-zeus-gold"></i>
+                                        ميزانية التفكير (Thinking Budget)
+                                    </span>
+                                    <span className={`text-xs px-2 py-1 rounded border ${localSettings.thinkingBudget > 0 ? 'bg-zeus-gold/10 text-zeus-gold border-zeus-gold/30' : 'bg-gray-800 text-gray-500 border-gray-700'}`}>
+                                        {localSettings.thinkingBudget === 0 ? 'معطل' : `${localSettings.thinkingBudget} Tokens`}
+                                    </span>
+                                </label>
+                                <p className="text-xs text-gray-500 mb-3">
+                                    حدد عدد التوكنز المخصصة لعملية التفكير قبل الإجابة. كلما زاد الرقم، زاد عمق التفكير (يدعم نماذج محددة مثل Gemini 3 Pro).
+                                </p>
+                                <input 
+                                    type="range" min="0" max="16384" step="1024"
+                                    value={localSettings.thinkingBudget || 0}
+                                    onChange={(e) => setLocalSettings({...localSettings, thinkingBudget: parseInt(e.target.value)})}
+                                    className="w-full accent-zeus-gold h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                />
+                                <div className="flex justify-between text-[10px] text-gray-600 font-mono mt-1">
+                                    <span>OFF</span>
+                                    <span>2048</span>
+                                    <span>4096</span>
+                                    <span>8192</span>
+                                    <span>16k</span>
+                                </div>
+                            </div>
                             
                             <div className="space-y-2">
                                 <label className="text-sm font-bold text-gray-300 flex justify-between">
