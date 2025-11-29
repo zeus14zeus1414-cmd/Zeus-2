@@ -446,18 +446,39 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                     />
                 ))}
 
-                {/* رسالة وهمية للمؤشر تظهر فوراً قبل وصول البيانات */}
+                {/* مؤشر التحميل المخصص الجديد (Zeus Loader) */}
                 {isWaitingForFirstChunk && (
-                    <MessageItem
-                        msg={{
-                            id: 'temp-loading-indicator',
-                            role: 'assistant',
-                            content: '',
-                            timestamp: Date.now()
-                        }}
-                        isLast={true}
-                        isStreaming={true}
-                    />
+                    <div className="flex justify-start animate-fade-in p-2">
+                        <div className="bg-black/80 border border-zeus-gold/20 rounded-2xl py-3 px-5 flex items-center gap-3 shadow-[0_0_20px_rgba(255,215,0,0.05)]">
+                             {/* الأيقونة والحلقة */}
+                             <div className="relative w-10 h-10 flex items-center justify-center">
+                                {/* الحلقة الدوارة المكونة من قطاعات تتحرك كالثعبان */}
+                                {/* تم إلغاء دوران SVG، واستخدام animate-dash-flow على الدائرة لتحريك الإزاحة */}
+                                <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50">
+                                    <circle
+                                        cx="25"
+                                        cy="25"
+                                        r="20"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="3"
+                                        strokeLinecap="round"
+                                        className="animate-dash-flow"
+                                        /* 
+                                           تم حساب المحيط ليكون تقريباً 126
+                                           النمط: 3 عواميد (28) + فراغات صغيرة (6) + فراغ كبير (30) 
+                                           28+6+28+6+28+30 = 126
+                                        */
+                                        strokeDasharray="28 6 28 6 28 30"
+                                    />
+                                </svg>
+                                {/* أيقونة البرق الثابتة */}
+                                <i className="fas fa-bolt text-zeus-gold text-lg drop-shadow-[0_0_5px_rgba(255,215,0,0.8)]"></i>
+                             </div>
+                             {/* النص النابض - أكبر وأقرب */}
+                             <span className="text-zeus-gold/90 text-base font-bold animate-pulse-fast select-none">لحظة من فضلك...</span>
+                        </div>
+                    </div>
                 )}
                 
                 <div ref={messagesEndRef} />
