@@ -97,18 +97,25 @@
             background: #FFD700;
         }
         
-        /* تجميد الصفحة تماماً لتشبه التطبيق */
-        html, body {
-            position: fixed;
-            width: 100%;
+        /* 
+           تعديل جذري لإصلاح مشاكل PWA:
+           إزالة position: fixed للسماح للمتصفح بالتحكم في العرض بشكل طبيعي
+           مع الحفاظ على منع السحب الزائد.
+        */
+        html {
             height: 100%;
-            height: 100dvh; /* استخدام الطول الديناميكي */
-            overflow: hidden;
-            overscroll-behavior: none; /* منع السحب للتحديث */
-            touch-action: pan-x pan-y; /* السماح بالتمرير فقط، منع التكبير */
+            overscroll-behavior: none; /* يمنع السحب للتحديث */
+        }
+        
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background-color: #000000;
+            overflow: hidden; /* يمنع تمرير الصفحة نفسها، التمرير يكون داخل العناصر فقط */
             -webkit-text-size-adjust: 100%;
             -webkit-tap-highlight-color: transparent;
-            background-color: #000000;
+            /* تم إزالة position: fixed و touch-action التي تسبب التجمد */
         }
 
         /* تحسينات النصوص */
@@ -351,7 +358,6 @@
         });
     }
 
-    // تسجيل الـ Service Worker لتمكين الـ PWA
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('/sw.js')
@@ -363,10 +369,6 @@
                 });
         });
     }
-    
-    // تم حذف مستمعات الأحداث (touch listeners) لأنها كانت تسبب تجميد التطبيق.
-    // الاعتماد الآن كلياً على CSS (touch-action: pan-x pan-y) و (overscroll-behavior: none).
-
 </script>
 </head>
 <body class="bg-black text-gray-100 min-h-screen overflow-hidden font-sans">

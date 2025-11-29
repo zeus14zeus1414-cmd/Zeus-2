@@ -238,7 +238,8 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className="fixed inset-0 flex bg-zeus-base text-white font-sans overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" dir="rtl">
+        // Changed from fixed to relative with h-[100dvh] to fix PWA freezing
+        <div className="relative flex flex-col h-[100dvh] w-full bg-zeus-base text-white font-sans overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" dir="rtl">
             
             {/* تراكب الموبايل */}
             {isSidebarOpen && (
@@ -248,71 +249,73 @@ const App: React.FC = () => {
                 />
             )}
 
-            {/* القائمة الجانبية */}
-            <div className={`
-                fixed md:relative z-30 h-full transition-all duration-300 ease-in-out
-                ${isSidebarOpen ? 'translate-x-0 w-80' : 'translate-x-full md:translate-x-0 md:w-0 md:opacity-0 md:overflow-hidden'}
-                right-0 border-l border-white/10 bg-zeus-surface shadow-xl
-                pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0
-            `}>
-                <Sidebar 
-                    chats={chats}
-                    currentChatId={currentChatId}
-                    onSelectChat={(id) => {
-                        setCurrentChatId(id);
-                        if (window.innerWidth < 768) setIsSidebarOpen(false);
-                    }}
-                    onNewChat={createNewChat}
-                    onRequestDelete={requestDeleteChat}
-                    onRequestRename={requestRenameChat}
-                    onClose={() => setIsSidebarOpen(false)}
-                    onReorder={handleReorder}
-                />
-            </div>
+            <div className="flex flex-1 overflow-hidden relative">
+                {/* القائمة الجانبية */}
+                <div className={`
+                    fixed md:relative z-30 h-full transition-all duration-300 ease-in-out
+                    ${isSidebarOpen ? 'translate-x-0 w-80' : 'translate-x-full md:translate-x-0 md:w-0 md:opacity-0 md:overflow-hidden'}
+                    right-0 border-l border-white/10 bg-zeus-surface shadow-xl
+                    pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0
+                `}>
+                    <Sidebar 
+                        chats={chats}
+                        currentChatId={currentChatId}
+                        onSelectChat={(id) => {
+                            setCurrentChatId(id);
+                            if (window.innerWidth < 768) setIsSidebarOpen(false);
+                        }}
+                        onNewChat={createNewChat}
+                        onRequestDelete={requestDeleteChat}
+                        onRequestRename={requestRenameChat}
+                        onClose={() => setIsSidebarOpen(false)}
+                        onReorder={handleReorder}
+                    />
+                </div>
 
-            {/* منطقة المحادثة الرئيسية */}
-            <div className="flex-1 flex flex-col z-10 relative h-full max-w-full bg-black">
-                {/* الهيدر */}
-                <header className="flex items-center justify-between p-4 border-b border-white/10 bg-zeus-surface shrink-0">
-                    <div className="flex items-center gap-3">
-                        <button 
-                            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                            className="p-2 text-zeus-gold hover:bg-white/10 rounded-lg transition-colors"
-                        >
-                            <i className="fas fa-bars"></i>
-                        </button>
-                        <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-full border border-zeus-gold bg-black flex items-center justify-center text-zeus-gold font-bold animate-pulse-fast">
-                                <i className="fas fa-bolt"></i>
-                            </div>
-                            <div>
-                                <h1 className="font-bold text-lg text-white">
-                                    زيوس <span className="text-xs font-normal text-gray-400">إله الرعد</span>
-                                </h1>
+                {/* منطقة المحادثة الرئيسية */}
+                <div className="flex-1 flex flex-col z-10 relative h-full max-w-full bg-black">
+                    {/* الهيدر */}
+                    <header className="flex items-center justify-between p-4 border-b border-white/10 bg-zeus-surface shrink-0 relative z-50">
+                        <div className="flex items-center gap-3">
+                            <button 
+                                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                                className="p-2 text-zeus-gold hover:bg-white/10 rounded-lg transition-colors"
+                            >
+                                <i className="fas fa-bars"></i>
+                            </button>
+                            <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full border border-zeus-gold bg-black flex items-center justify-center text-zeus-gold font-bold animate-pulse-fast">
+                                    <i className="fas fa-bolt"></i>
+                                </div>
+                                <div>
+                                    <h1 className="font-bold text-lg text-white">
+                                        زيوس <span className="text-xs font-normal text-gray-400">إله الرعد</span>
+                                    </h1>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                         <span className="hidden md:inline-block text-xs text-zeus-gold bg-zeus-gold/10 px-3 py-1 rounded-full border border-zeus-gold/20">
-                            {settings.model}
-                        </span>
-                        <button 
-                            onClick={() => setIsSettingsOpen(true)}
-                            className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-                            title="الإعدادات"
-                        >
-                            <i className="fas fa-cog fa-lg"></i>
-                        </button>
-                    </div>
-                </header>
+                        <div className="flex items-center gap-3">
+                            <span className="hidden md:inline-block text-xs text-zeus-gold bg-zeus-gold/10 px-3 py-1 rounded-full border border-zeus-gold/20">
+                                {settings.model}
+                            </span>
+                            <button 
+                                onClick={() => setIsSettingsOpen(true)}
+                                className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                                title="الإعدادات"
+                            >
+                                <i className="fas fa-cog fa-lg"></i>
+                            </button>
+                        </div>
+                    </header>
 
-                {/* نافذة المحادثة */}
-                <ChatWindow 
-                    chat={currentChatId ? chats[currentChatId] : null}
-                    onSendMessage={handleSendMessage}
-                    isStreaming={isStreaming}
-                    onNewChat={createNewChat} 
-                />
+                    {/* نافذة المحادثة */}
+                    <ChatWindow 
+                        chat={currentChatId ? chats[currentChatId] : null}
+                        onSendMessage={handleSendMessage}
+                        isStreaming={isStreaming}
+                        onNewChat={createNewChat} 
+                    />
+                </div>
             </div>
 
             {/* مودال الإعدادات */}
