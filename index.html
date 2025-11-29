@@ -2,8 +2,20 @@
 <html lang="ar" dir="rtl" class="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>شات زيوس - إله الرعد</title>
+    
+    <!-- PWA Settings -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#000000">
+    <meta name="background-color" content="#000000">
+    
+    <!-- iOS Support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Zeus">
+    <link rel="apple-touch-icon" href="https://ui-avatars.com/api/?name=Zeus&background=000000&color=FFD700&size=192&font-size=0.5&rounded=true&bold=true">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -53,6 +65,8 @@
         body {
             background-color: #000000;
             color: #e0e0e0;
+            /* منع السحب لأسفل للتحديث في الموبايل ليعطي شعور التطبيق */
+            overscroll-behavior-y: none;
         }
 
         /* تحسينات النصوص */
@@ -290,6 +304,19 @@
             }, 2000);
         }).catch(err => {
             console.error('Failed to copy', err);
+        });
+    }
+
+    // تسجيل الـ Service Worker لتمكين الـ PWA
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js')
+                .then(registration => {
+                    console.log('SW registered:', registration);
+                })
+                .catch(error => {
+                    console.log('SW registration failed:', error);
+                });
         });
     }
 </script>
