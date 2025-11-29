@@ -238,7 +238,7 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className="fixed inset-0 flex bg-zeus-base text-white font-sans overflow-hidden" dir="rtl">
+        <div className="fixed inset-0 flex bg-zeus-base text-white font-sans overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" dir="rtl">
             
             {/* تراكب الموبايل */}
             {isSidebarOpen && (
@@ -253,6 +253,7 @@ const App: React.FC = () => {
                 fixed md:relative z-30 h-full transition-all duration-300 ease-in-out
                 ${isSidebarOpen ? 'translate-x-0 w-80' : 'translate-x-full md:translate-x-0 md:w-0 md:opacity-0 md:overflow-hidden'}
                 right-0 border-l border-white/10 bg-zeus-surface shadow-xl
+                pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0
             `}>
                 <Sidebar 
                     chats={chats}
