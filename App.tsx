@@ -23,7 +23,8 @@ const App: React.FC = () => {
     const [currentChatId, setCurrentChatId] = useState<string | null>(null);
     const [settings, setSettings] = useState<Settings>(defaultSettings);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    // التغيير هنا: القائمة الجانبية مغلقة افتراضياً
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
     
     // تحميل البيانات
@@ -31,11 +32,10 @@ const App: React.FC = () => {
         try {
             const loadedChats = localStorage.getItem('zeusChats');
             const loadedSettings = localStorage.getItem('zeusSettings');
-            const loadedCurrentId = localStorage.getItem('zeusCurrentChatId');
+            // تم إزالة تحميل currentChatId لضمان ظهور شاشة الترحيب دائماً عند الفتح
 
             if (loadedChats) setChats(JSON.parse(loadedChats));
             if (loadedSettings) setSettings({ ...defaultSettings, ...JSON.parse(loadedSettings) });
-            if (loadedCurrentId) setCurrentChatId(loadedCurrentId);
         } catch (e) {
             console.error("فشل في تحميل البيانات", e);
         }
@@ -278,6 +278,7 @@ const App: React.FC = () => {
                     chat={currentChatId ? chats[currentChatId] : null}
                     onSendMessage={handleSendMessage}
                     isStreaming={isStreaming}
+                    onNewChat={createNewChat} // تمرير دالة إنشاء محادثة جديدة
                 />
             </div>
 

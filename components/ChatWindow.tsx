@@ -1,4 +1,3 @@
-
 import React, { useRef, useEffect, useState, useMemo, useLayoutEffect } from 'react';
 import { Chat, Attachment, Message } from '../types';
 import { marked } from 'marked';
@@ -8,6 +7,7 @@ interface Props {
     chat: Chat | null;
     onSendMessage: (text: string, files: Attachment[]) => void;
     isStreaming: boolean;
+    onNewChat: () => void;
 }
 
 // إعدادات الحد الأقصى للعرض والتحميل
@@ -126,24 +126,41 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
     );
 });
 
-const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming }) => {
+const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewChat }) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [inputValue, setInputValue] = useState('');
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [showScrollButton, setShowScrollButton] = useState(false);
 
     // --- منطق التحميل الكسول (Lazy Loading) ---
     const [visibleCount, setVisibleCount] = useState(MESSAGES_BATCH_SIZE);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const prevScrollHeightRef = useRef<number>(0);
-    const prevScrollTopRef = useRef<number>(0);
 
-    // إعادة تعيين العداد عند تغيير المحادثة
+    // دالة مساعدة للتمرير للأسفل
+    const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+        if (containerRef.current) {
+            containerRef.current.scrollTo({
+                top: containerRef.current.scrollHeight,
+                behavior: behavior
+            });
+        }
+    };
+
+    // إعادة تعيين العداد عند تغيير المحادثة + التمرير للأسفل فوراً
     useEffect(() => {
         setVisibleCount(MESSAGES_BATCH_SIZE);
         setIsLoadingHistory(false);
+        setShowScrollButton(false);
+        
+        // إجبار التمرير للأسفل فوراً عند فتح محادثة جديدة
+        // استخدام setTimeout لضمان اكتمال الـ render
+        setTimeout(() => {
+            scrollToBottom('instant');
+        }, 50); // تأخير بسيط جداً
     }, [chat?.id]);
 
     // زيادة عدد الرسائل المعروضة عند وصول رسالة جديدة
@@ -162,15 +179,19 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming }) => {
 
     const hasMoreHistory = chat ? chat.messages.length > visibleCount : false;
 
-    // معالجة التمرير لتحميل التاريخ
+    // معالجة التمرير لتحميل التاريخ وإظهار زر العودة
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-        const { scrollTop, scrollHeight } = e.currentTarget;
+        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
         
-        // إذا وصلنا للأعلى وهناك المزيد من الرسائل
+        // منطق زر العودة للأسفل
+        // إذا كان المستخدم بعيداً عن الأسفل بأكثر من 300 بكسل
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        setShowScrollButton(distanceFromBottom > 300);
+
+        // إذا وصلنا للأعلى وهناك المزيد من الرسائل (منطق التحميل الكسول)
         if (scrollTop === 0 && hasMoreHistory && !isLoadingHistory) {
             setIsLoadingHistory(true);
             prevScrollHeightRef.current = scrollHeight;
-            prevScrollTopRef.current = scrollTop;
             
             // محاكاة تأخير بسيط للتحميل (لإظهار المؤشر)
             setTimeout(() => {
@@ -191,12 +212,14 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming }) => {
     }, [visibleCount]);
 
     // التمرير التلقائي للأسفل عند البث أو الرسائل الجديدة
-    // لكن فقط إذا لم نكن نحمل التاريخ القديم
+    // لكن فقط إذا لم نكن نحمل التاريخ القديم ولم يقم المستخدم بالتمرير للأعلى يدوياً بعيداً جداً (أثناء البث)
     useEffect(() => {
         if (!isLoadingHistory && isStreaming) {
-            requestAnimationFrame(() => {
-                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-            });
+             // إذا كان يكتب، نمرر للأسفل. إذا كان المستخدم يقرأ في الأعلى، لا نمرر (يمكن إضافته كتحسين لاحق)
+             // حالياً، سلوك الديفولت: التمرير للأسفل مع كل قطعة
+             // ولكن للراحة، إذا كان يقرأ في الأعلى (showScrollButton === true) قد لا نرغب بالمقاطعة
+             // ولكن الطلب الأساسي هو حل مشكلة "يرجعني لأول رسالة"، وهذا تم حله في useEffect الأول
+             scrollToBottom('smooth');
         }
     }, [displayedMessages.length, isStreaming, isLoadingHistory]);
 
@@ -306,6 +329,8 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming }) => {
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
         }
+        // تمرير للأسفل عند الإرسال
+        setTimeout(() => scrollToBottom(), 100);
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -317,12 +342,21 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming }) => {
 
     if (!chat) {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 opacity-80 animate-fade-in">
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 opacity-80 animate-fade-in relative">
                 <div className="w-32 h-32 rounded-full border-2 border-zeus-gold bg-black/50 flex items-center justify-center mb-6 animate-float shadow-[0_0_30px_rgba(255,215,0,0.2)]">
                     <i className="fas fa-bolt text-5xl text-zeus-gold"></i>
                 </div>
                 <h2 className="text-3xl md:text-4xl font-bold mb-4 text-white drop-shadow-lg font-sans">مرحباً بك في عرش زيوس</h2>
                 <p className="text-zeus-gold/80 max-w-lg text-base md:text-lg mb-8 leading-relaxed">إله الرعد والحكمة في خدمتك. اختر نموذجاً، أرفق ملفاتك، واسأل عما تشاء.</p>
+                
+                <button 
+                    onClick={onNewChat}
+                    className="mb-8 px-8 py-4 bg-zeus-gold text-black font-bold text-lg rounded-xl hover:bg-yellow-400 hover:scale-105 transition-all shadow-[0_0_20px_rgba(255,215,0,0.4)] flex items-center gap-3"
+                >
+                    <i className="fas fa-plus"></i>
+                    بدء محادثة جديدة
+                </button>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg w-full px-4">
                     {['تحليل الأكواد البرمجية', 'شرح الصور المعقدة', 'الترجمة الاحترافية', 'حل المشكلات التقنية'].map(hint => (
                         <div key={hint} className="glass-gold p-4 rounded-xl text-sm hover:bg-zeus-gold/10 cursor-pointer transition-all border border-transparent hover:border-zeus-gold text-gray-300 flex items-center gap-2">
@@ -336,12 +370,13 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming }) => {
     }
 
     return (
-        <div className="flex-1 flex flex-col overflow-hidden mx-2 md:mx-4 mb-4 glass-gold rounded-2xl border border-zeus-gold/20 shadow-2xl">
+        <div className="flex-1 flex flex-col overflow-hidden mx-2 md:mx-4 mb-4 glass-gold rounded-2xl border border-zeus-gold/20 shadow-2xl relative">
+            
             {/* منطقة الرسائل */}
             <div 
                 ref={containerRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto p-4 space-y-6 md:space-y-8 custom-scrollbar"
+                className="flex-1 overflow-y-auto p-4 space-y-6 md:space-y-8 custom-scrollbar scroll-smooth"
             >
                 {/* مؤشر تحميل التاريخ القديم */}
                 {isLoadingHistory && (
@@ -388,8 +423,19 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming }) => {
             </div>
 
             {/* منطقة الإدخال */}
-            <div className="p-4 bg-black/40 backdrop-blur-md border-t border-zeus-gold/20">
+            <div className="p-4 bg-black/40 backdrop-blur-md border-t border-zeus-gold/20 z-10 relative">
                 
+                 {/* زر العودة للأسفل - متمركز فوق الإدخال تماماً ومتجاوب */}
+                {showScrollButton && (
+                    <button 
+                        onClick={() => scrollToBottom('smooth')}
+                        className="absolute bottom-full right-4 md:right-8 mb-4 z-20 w-8 h-8 md:w-12 md:h-12 bg-black/70 backdrop-blur-md border border-zeus-gold/50 rounded-full flex items-center justify-center text-zeus-gold shadow-[0_0_20px_rgba(255,215,0,0.3)] hover:scale-110 hover:bg-zeus-gold hover:text-black transition-all duration-300 animate-bounce group"
+                        title="الذهاب للأحدث"
+                    >
+                        <i className="fas fa-arrow-down text-xs md:text-lg group-hover:animate-pulse"></i>
+                    </button>
+                )}
+
                 {attachments.length > 0 && (
                     <div className="flex gap-2 mb-3 overflow-x-auto pb-2 scrollbar-hide">
                         {attachments.map((att, i) => (
