@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useState, useMemo, useLayoutEffect } from 'react';
 import { Chat, Attachment, Message } from '../types';
 import { marked } from 'marked';
@@ -134,6 +135,9 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [showScrollButton, setShowScrollButton] = useState(false);
+    
+    // مرجع لتتبع ما إذا كان المستخدم في الأسفل حالياً
+    const isAtBottomRef = useRef(true);
 
     // --- منطق التحميل الكسول (Lazy Loading) ---
     const [visibleCount, setVisibleCount] = useState(MESSAGES_BATCH_SIZE);
@@ -147,6 +151,9 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                 top: containerRef.current.scrollHeight,
                 behavior: behavior
             });
+            // نؤكد أننا في الأسفل بعد التمرير القسري
+            isAtBottomRef.current = true;
+            setShowScrollButton(false);
         }
     };
 
@@ -155,12 +162,13 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         setVisibleCount(MESSAGES_BATCH_SIZE);
         setIsLoadingHistory(false);
         setShowScrollButton(false);
+        isAtBottomRef.current = true; // إعادة تعيين الحالة للأسفل
         
         // إجبار التمرير للأسفل فوراً عند فتح محادثة جديدة
         // استخدام setTimeout لضمان اكتمال الـ render
         setTimeout(() => {
             scrollToBottom('instant');
-        }, 50); // تأخير بسيط جداً
+        }, 50); 
     }, [chat?.id]);
 
     // زيادة عدد الرسائل المعروضة عند وصول رسالة جديدة
@@ -179,13 +187,18 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
 
     const hasMoreHistory = chat ? chat.messages.length > visibleCount : false;
 
-    // معالجة التمرير لتحميل التاريخ وإظهار زر العودة
+    // معالجة التمرير لتحميل التاريخ وتحديد موقع المستخدم
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
         const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
         
-        // منطق زر العودة للأسفل
-        // إذا كان المستخدم بعيداً عن الأسفل بأكثر من 300 بكسل
+        // حساب المسافة عن الأسفل
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        
+        // إذا كانت المسافة أقل من 100 بكسل، نعتبر أن المستخدم في الأسفل ويريد التمرير التلقائي
+        const isAtBottom = distanceFromBottom < 100;
+        isAtBottomRef.current = isAtBottom;
+        
+        // زر العودة يظهر فقط إذا ابتعد المستخدم كثيراً (300 بكسل)
         setShowScrollButton(distanceFromBottom > 300);
 
         // إذا وصلنا للأعلى وهناك المزيد من الرسائل (منطق التحميل الكسول)
@@ -193,7 +206,6 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
             setIsLoadingHistory(true);
             prevScrollHeightRef.current = scrollHeight;
             
-            // محاكاة تأخير بسيط للتحميل (لإظهار المؤشر)
             setTimeout(() => {
                 setVisibleCount(prev => Math.min(prev + MESSAGES_BATCH_SIZE, chat!.messages.length));
                 setIsLoadingHistory(false);
@@ -211,17 +223,20 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         }
     }, [visibleCount]);
 
-    // التمرير التلقائي للأسفل عند البث أو الرسائل الجديدة
-    // لكن فقط إذا لم نكن نحمل التاريخ القديم ولم يقم المستخدم بالتمرير للأعلى يدوياً بعيداً جداً (أثناء البث)
+    // التمرير التلقائي الذكي أثناء البث
+    // نعتمد على طول محتوى آخر رسالة لتفعيل التمرير مع كل حرف جديد
+    const lastMessage = displayedMessages[displayedMessages.length - 1];
+    const lastMessageContentLength = lastMessage?.content?.length || 0;
+
     useEffect(() => {
-        if (!isLoadingHistory && isStreaming) {
-             // إذا كان يكتب، نمرر للأسفل. إذا كان المستخدم يقرأ في الأعلى، لا نمرر (يمكن إضافته كتحسين لاحق)
-             // حالياً، سلوك الديفولت: التمرير للأسفل مع كل قطعة
-             // ولكن للراحة، إذا كان يقرأ في الأعلى (showScrollButton === true) قد لا نرغب بالمقاطعة
-             // ولكن الطلب الأساسي هو حل مشكلة "يرجعني لأول رسالة"، وهذا تم حله في useEffect الأول
+        // نمرر للأسفل فقط إذا:
+        // 1. نحن في وضع البث (أو رسالة جديدة وصلت للتو)
+        // 2. لم نكن نحمل التاريخ القديم
+        // 3. المستخدم كان بالفعل في أسفل الصفحة (لم يصعد للأعلى للقراءة)
+        if (!isLoadingHistory && isAtBottomRef.current) {
              scrollToBottom('smooth');
         }
-    }, [displayedMessages.length, isStreaming, isLoadingHistory]);
+    }, [lastMessageContentLength, isStreaming, isLoadingHistory, displayedMessages.length]);
 
     // تحديد ما إذا كنا ننتظر الرد الأول
     const isWaitingForFirstChunk = isStreaming && chat && chat.messages.length > 0 && chat.messages[chat.messages.length - 1].role === 'user';
@@ -329,8 +344,10 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
         }
-        // تمرير للأسفل عند الإرسال
-        setTimeout(() => scrollToBottom(), 100);
+        
+        // عند الإرسال، نجبر الشاشة على النزول للأسفل وتفعيل المتابعة التلقائية
+        isAtBottomRef.current = true;
+        setTimeout(() => scrollToBottom('smooth'), 100);
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
