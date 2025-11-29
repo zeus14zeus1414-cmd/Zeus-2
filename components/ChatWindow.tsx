@@ -98,9 +98,9 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
     const isProcessing = !isUser && isLast && isStreaming;
 
     return (
-        <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} group animate-fade-in`}>
+        <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} group animate-fade-in px-1`}>
             <div className={`
-                relative transition-all duration-500 ease-out flex flex-col min-w-[50px] overflow-hidden
+                relative transition-all duration-500 ease-out flex flex-col min-w-[50px] overflow-hidden max-w-[95%] md:max-w-[85%]
                 ${isUser 
                     ? 'bg-gradient-to-br from-zeus-surface to-gray-900 border border-zeus-gold/20 text-white rounded-2xl rounded-tl-sm p-4 md:p-5' 
                     : `bg-black/60 border border-zeus-gold/30 text-gray-100 shadow-[0_0_20px_rgba(255,215,0,0.05)]
@@ -460,7 +460,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
 
     return (
         <div className="flex-1 flex flex-col overflow-hidden mx-2 md:mx-4 mb-4 glass-gold rounded-2xl border border-zeus-gold/20 shadow-2xl relative">
-            <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 space-y-6 md:space-y-8 custom-scrollbar scroll-smooth">
+            <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 md:space-y-8 custom-scrollbar scroll-smooth">
                 {isLoadingHistory && (
                     <div className="flex justify-center py-2">
                         <div className="w-6 h-6 border-2 border-zeus-gold border-t-transparent rounded-full animate-spin"></div>

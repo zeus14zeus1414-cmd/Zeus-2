@@ -245,6 +245,7 @@
             direction: ltr !important;
             text-align: left !important;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            max-width: 100%; /* ضمان عدم تمدد الحاوية */
         }
 
         .code-block-header {
@@ -284,6 +285,8 @@
             text-align: left !important;
             font-size: 0.7em !important; /* هذا السطر يجعل حجم الخط في الكود 70% من حجم النص الأساسي */
             line-height: 1.6;
+            max-width: 100%; /* ضمان التمرير الداخلي */
+            white-space: pre; /* الحفاظ على التنسيق */
         }
 
         .markdown-body code {
