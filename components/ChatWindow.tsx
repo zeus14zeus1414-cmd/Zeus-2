@@ -23,26 +23,32 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming }: { msg: Message, is
     // حالة توسيع قسم التفكير
     const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
     
-    // تحليل المحتوى لاستخراج التفكير (ما بين <think>)
+    // تحليل المحتوى لاستخراج التفكير (ما بين <think> أو <فكّر>)
     const parsedContent = useMemo(() => {
         const rawContent = msg.content || '';
         
-        // Regex لاستخراج ما بين <think> و </think>
-        // نستخدم [\s\S]*? لدعم الأسطر المتعددة
-        const thinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/);
+        // Regex محدث لدعم الوسوم الإنجليزية والعربية
+        // يدعم: <think>, <فكّر>, <تفكير>
+        const thinkRegex = /<(?:think|فكّر|تفكير)>([\s\S]*?)<\/(?:think|فكّر|تفكير)>/i;
+        const thinkMatch = rawContent.match(thinkRegex);
         
         let thinkContent = '';
         let finalAnswer = rawContent;
 
         if (thinkMatch) {
             thinkContent = thinkMatch[1].trim();
-            finalAnswer = rawContent.replace(/<think>[\s\S]*?<\/think>/, '').trim();
-        } else if (isLast && isStreaming && !isUser && rawContent.includes('<think>')) {
+            // حذف بلوك التفكير بالكامل من الجواب النهائي
+            finalAnswer = rawContent.replace(thinkRegex, '').trim();
+        } else if (isLast && isStreaming && !isUser) {
              // حالة خاصة أثناء البث: قد يكون التاج مفتوحاً ولم يغلق بعد
-             const parts = rawContent.split('<think>');
-             if (parts.length > 1) {
-                 thinkContent = parts[1].trim(); // اعتبر كل ما بعد الفتح تفكيراً مؤقتاً
-                 finalAnswer = parts[0].trim();
+             // نبحث عن أي وسم فتح محتمل
+             const openTagMatch = rawContent.match(/<(?:think|فكّر|تفكير)>/i);
+             if (openTagMatch) {
+                 const parts = rawContent.split(openTagMatch[0]);
+                 if (parts.length > 1) {
+                     thinkContent = parts[1].trim(); // اعتبر كل ما بعد الفتح تفكيراً مؤقتاً
+                     finalAnswer = parts[0].trim();
+                 }
              }
         }
 

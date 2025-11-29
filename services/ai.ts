@@ -16,19 +16,21 @@ export const AI_MODELS = {
     ]
 };
 
-// تعليمة صارمة لإجبار النموذج على إخراج التفكير بصيغة قابلة للتحليل
+// تعليمة صارمة لإجبار النموذج على إخراج التفكير بصيغة قابلة للتحليل وباللغة العربية
 const THINKING_SYSTEM_INSTRUCTION = `
 IMPORTANT: You are currently in "Deep Thinking Mode".
 1. Before answering, you MUST engage in a comprehensive, step-by-step reasoning process.
 2. You MUST enclose your internal monologue and reasoning process strictly within <think> and </think> tags.
-3. The content inside <think> tags will be displayed to the user as your "thought process".
-4. After the closing </think> tag, provide your final, polished answer to the user.
-5. Do NOT be lazy. Analyze the request deeply.
+3. CRITICAL: Your internal reasoning (inside <think> tags) MUST BE IN ARABIC LANGUAGE only. Do not think in English.
+4. CRITICAL: You MUST use the exact tags <think> and </think>. Do NOT translate the tags themselves into Arabic (e.g., do NOT use <فكّر>).
+5. The content inside <think> tags will be displayed to the user as your "thought process".
+6. After the closing </think> tag, provide your final, polished answer to the user.
+7. Do NOT be lazy. Analyze the request deeply.
 Format your response exactly like this:
 <think>
-[Your deep reasoning, analysis, and step-by-step deduction goes here...]
+[خطوات التفكير والتحليل العميق يجب أن تكون باللغة العربية هنا...]
 </think>
-[Your final answer goes here]
+[إجابتك النهائية هنا]
 `;
 
 export const streamResponse = async (
