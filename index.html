@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl" class="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>ChatZEUS</title>
     
     <!-- PWA Settings -->
@@ -65,11 +65,18 @@
             background: #FFD700;
         }
         
-        body {
+        /* تجميد الصفحة تماماً لتشبه التطبيق */
+        html, body {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            height: 100dvh; /* استخدام الطول الديناميكي */
+            overflow: hidden;
+            overscroll-behavior: none; /* منع السحب للتحديث */
+            touch-action: pan-x pan-y; /* السماح بالتمرير فقط، منع التكبير */
+            -webkit-text-size-adjust: 100%;
+            -webkit-tap-highlight-color: transparent;
             background-color: #000000;
-            color: #e0e0e0;
-            /* منع السحب لأسفل للتحديث في الموبايل ليعطي شعور التطبيق */
-            overscroll-behavior-y: none;
         }
 
         /* تحسينات النصوص */
@@ -322,6 +329,27 @@
                 });
         });
     }
+
+    // --- كود قوي لمنع التكبير (Zoom) على أجهزة iOS و Android ---
+    document.addEventListener('gesturestart', function (e) {
+        e.preventDefault();
+    });
+
+    // منع التكبير بالنقر المزدوج
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', function (event) {
+        const now = (new Date()).getTime();
+        if (now - lastTouchEnd <= 300) {
+            event.preventDefault();
+        }
+        lastTouchEnd = now;
+    }, false);
+
+    // منع حركة الصفحة بأكملها (Rubber banding)
+    document.body.addEventListener('touchmove', function(event) {
+        // نترك هذا فارغاً أو نتحكم فيه إذا لزم الأمر، لكن CSS overflow:hidden يكفي غالباً
+    }, { passive: false });
+
 </script>
 </head>
 <body class="bg-black text-gray-100 min-h-screen overflow-hidden font-sans">

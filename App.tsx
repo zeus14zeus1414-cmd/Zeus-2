@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Settings, Chat, Message, Attachment } from './types';
 import { streamResponse, generateChatTitle } from './services/ai';
@@ -207,7 +206,7 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className="flex h-screen relative bg-zeus-base text-white font-sans overflow-hidden" dir="rtl">
+        <div className="fixed inset-0 flex bg-zeus-base text-white font-sans overflow-hidden" dir="rtl">
             
             {/* تراكب الموبايل */}
             {isSidebarOpen && (
@@ -241,7 +240,7 @@ const App: React.FC = () => {
             {/* منطقة المحادثة الرئيسية */}
             <div className="flex-1 flex flex-col z-10 relative h-full max-w-full bg-black">
                 {/* الهيدر */}
-                <header className="flex items-center justify-between p-4 border-b border-white/10 bg-zeus-surface">
+                <header className="flex items-center justify-between p-4 border-b border-white/10 bg-zeus-surface shrink-0">
                     <div className="flex items-center gap-3">
                         <button 
                             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
