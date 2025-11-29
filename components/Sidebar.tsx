@@ -7,14 +7,15 @@ interface Props {
     currentChatId: string | null;
     onSelectChat: (id: string) => void;
     onNewChat: () => void;
-    onDeleteChat: (id: string) => void;
-    onEditTitle: (id: string, newTitle: string) => void;
+    // Updated props signature
+    onRequestDelete: (id: string) => void;
+    onRequestRename: (id: string, currentTitle: string) => void;
     onClose: () => void;
     onReorder: (newOrder: Chat[]) => void; 
 }
 
 const Sidebar: React.FC<Props> = ({ 
-    chats, currentChatId, onSelectChat, onNewChat, onDeleteChat, onEditTitle, onClose, onReorder 
+    chats, currentChatId, onSelectChat, onNewChat, onRequestDelete, onRequestRename, onClose, onReorder 
 }) => {
     const [draggedItem, setDraggedItem] = useState<Chat | null>(null);
     const dragOverItem = useRef<Chat | null>(null);
@@ -40,7 +41,7 @@ const Sidebar: React.FC<Props> = ({
     };
 
     return (
-        <div className="flex flex-col h-full p-4 bg-zeus-surface border-l border-white/5">
+        <div className="flex flex-col h-full p-4 bg-zeus-surface border-l border-white/5 select-none">
             <div className="flex items-center justify-between mb-6 md:hidden">
                 <h2 className="text-xl font-bold text-zeus-gold">السجل</h2>
                 <button onClick={onClose} className="text-gray-400 hover:text-white"><i className="fas fa-times"></i></button>
@@ -48,15 +49,15 @@ const Sidebar: React.FC<Props> = ({
 
             <button 
                 onClick={onNewChat}
-                className="w-full py-3 px-4 mb-6 bg-zeus-gold text-black rounded-xl hover:bg-yellow-400 shadow-lg shadow-zeus-gold/20 transition-all flex items-center justify-center gap-2 group font-bold"
+                className="w-full py-3 px-4 mb-6 bg-zeus-gold text-black rounded-xl hover:bg-yellow-400 shadow-lg shadow-zeus-gold/20 transition-all flex items-center justify-center gap-2 group font-bold active:scale-95"
             >
-                <i className="fas fa-plus transition-transform"></i>
+                <i className="fas fa-plus transition-transform group-hover:rotate-90"></i>
                 <span>محادثة جديدة</span>
             </button>
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
                 {sortedChats.length === 0 ? (
-                    <div className="text-center text-gray-600 mt-10 text-sm flex flex-col items-center">
+                    <div className="text-center text-gray-600 mt-10 text-sm flex flex-col items-center animate-fade-in">
                         <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
                              <i className="fas fa-comments text-2xl opacity-50"></i>
                         </div>
@@ -74,7 +75,7 @@ const Sidebar: React.FC<Props> = ({
                             className={`
                                 group relative p-3 rounded-xl cursor-pointer border transition-all duration-200 flex flex-col
                                 ${chat.id === currentChatId 
-                                    ? 'bg-white/10 border-zeus-gold/40 shadow-[0_0_15px_rgba(255,215,0,0.05)]' 
+                                    ? 'bg-white/10 border-zeus-gold/40 shadow-[0_0_15px_rgba(255,215,0,0.05)] translate-x-1' 
                                     : 'bg-transparent border-transparent hover:bg-white/5'
                                 }
                                 ${draggedItem?.id === chat.id ? 'opacity-50 border-dashed border-white' : ''}
@@ -101,24 +102,23 @@ const Sidebar: React.FC<Props> = ({
                                     onClick={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
-                                        const newTitle = prompt("تعديل العنوان", chat.title);
-                                        if (newTitle) onEditTitle(chat.id, newTitle);
+                                        onRequestRename(chat.id, chat.title);
                                     }}
-                                    className="p-1.5 px-3 rounded-md bg-black/40 hover:bg-blue-500/20 hover:text-blue-400 text-gray-400 text-xs transition-colors flex items-center gap-1"
+                                    className="w-8 h-8 rounded-lg bg-black/40 hover:bg-blue-500/20 hover:text-blue-400 text-gray-400 transition-colors flex items-center justify-center"
                                     title="تعديل الاسم"
                                 >
-                                    <i className="fas fa-pen"></i>
+                                    <i className="fas fa-pen text-xs"></i>
                                 </button>
                                 <button 
                                     onClick={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
-                                        if(confirm('هل أنت متأكد من حذف هذه المحادثة؟')) onDeleteChat(chat.id);
+                                        onRequestDelete(chat.id);
                                     }}
-                                    className="p-1.5 px-3 rounded-md bg-black/40 hover:bg-red-500/20 hover:text-red-400 text-gray-400 text-xs transition-colors flex items-center gap-1"
+                                    className="w-8 h-8 rounded-lg bg-black/40 hover:bg-red-500/20 hover:text-red-400 text-gray-400 transition-colors flex items-center justify-center"
                                     title="حذف"
                                 >
-                                    <i className="fas fa-trash"></i>
+                                    <i className="fas fa-trash text-xs"></i>
                                 </button>
                             </div>
                         </div>

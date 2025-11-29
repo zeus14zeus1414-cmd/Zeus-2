@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { Settings, Chat, Message, Attachment } from './types';
 import { streamResponse, generateChatTitle } from './services/ai';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import SettingsModal from './components/SettingsModal';
+import { DeleteModal, RenameModal } from './components/ActionModals';
 
 const defaultSettings: Settings = {
     provider: 'gemini',
@@ -23,17 +25,20 @@ const App: React.FC = () => {
     const [currentChatId, setCurrentChatId] = useState<string | null>(null);
     const [settings, setSettings] = useState<Settings>(defaultSettings);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    // التغيير هنا: القائمة الجانبية مغلقة افتراضياً
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
+
+    // Modal States
+    const [activeModal, setActiveModal] = useState<'delete' | 'rename' | null>(null);
+    const [modalTargetId, setModalTargetId] = useState<string | null>(null);
+    const [modalTargetTitle, setModalTargetTitle] = useState<string>('');
     
     // تحميل البيانات
     useEffect(() => {
         try {
             const loadedChats = localStorage.getItem('zeusChats');
             const loadedSettings = localStorage.getItem('zeusSettings');
-            // تم إزالة تحميل currentChatId لضمان ظهور شاشة الترحيب دائماً عند الفتح
-
+            
             if (loadedChats) setChats(JSON.parse(loadedChats));
             if (loadedSettings) setSettings({ ...defaultSettings, ...JSON.parse(loadedSettings) });
         } catch (e) {
@@ -68,16 +73,46 @@ const App: React.FC = () => {
         if (window.innerWidth < 768) setIsSidebarOpen(false);
     };
 
-    const deleteChat = (id: string) => {
-        setChats(prev => {
-            const next = { ...prev };
-            delete next[id];
-            return next;
-        });
-        if (currentChatId === id) setCurrentChatId(null);
+    // Trigger Modal
+    const requestDeleteChat = (id: string) => {
+        setModalTargetId(id);
+        setActiveModal('delete');
     };
 
-    const updateChatTitle = (id: string, title: string) => {
+    // Actual Logic
+    const confirmDeleteChat = () => {
+        if (modalTargetId) {
+            setChats(prev => {
+                const next = { ...prev };
+                delete next[modalTargetId];
+                return next;
+            });
+            if (currentChatId === modalTargetId) setCurrentChatId(null);
+            setActiveModal(null);
+            setModalTargetId(null);
+        }
+    };
+
+    // Trigger Modal
+    const requestRenameChat = (id: string, currentTitle: string) => {
+        setModalTargetId(id);
+        setModalTargetTitle(currentTitle);
+        setActiveModal('rename');
+    };
+
+    // Actual Logic
+    const confirmRenameChat = (newTitle: string) => {
+        if (modalTargetId) {
+            setChats(prev => ({
+                ...prev,
+                [modalTargetId]: { ...prev[modalTargetId], title: newTitle, updatedAt: Date.now() }
+            }));
+            setActiveModal(null);
+            setModalTargetId(null);
+        }
+    };
+
+    const updateChatTitleAuto = (id: string, title: string) => {
         setChats(prev => ({
             ...prev,
             [id]: { ...prev[id], title, updatedAt: Date.now() }
@@ -112,7 +147,6 @@ const App: React.FC = () => {
             timestamp: Date.now()
         };
 
-        // تحديث واجهة المستخدم فوراً
         setChats(prev => {
             const chat = prev[chatId!];
             return {
@@ -121,16 +155,15 @@ const App: React.FC = () => {
                     ...chat,
                     messages: [...chat.messages, userMsg],
                     updatedAt: Date.now(),
-                    order: Date.now() // رفع المحادثة للأعلى
+                    order: Date.now()
                 }
             };
         });
 
-        // توليد عنوان للمحادثة إذا كانت جديدة
         if (isNewChat && content.trim()) {
             generateChatTitle(content, settings)
                 .then(title => {
-                    if (title) updateChatTitle(chatId!, title);
+                    if (title) updateChatTitleAuto(chatId!, title);
                 })
                 .catch(err => console.error("Error generating title", err));
         }
@@ -230,8 +263,8 @@ const App: React.FC = () => {
                         if (window.innerWidth < 768) setIsSidebarOpen(false);
                     }}
                     onNewChat={createNewChat}
-                    onDeleteChat={deleteChat}
-                    onEditTitle={updateChatTitle}
+                    onRequestDelete={requestDeleteChat}
+                    onRequestRename={requestRenameChat}
                     onClose={() => setIsSidebarOpen(false)}
                     onReorder={handleReorder}
                 />
@@ -249,7 +282,7 @@ const App: React.FC = () => {
                             <i className="fas fa-bars"></i>
                         </button>
                         <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-full border border-zeus-gold bg-black flex items-center justify-center text-zeus-gold font-bold">
+                            <div className="w-8 h-8 rounded-full border border-zeus-gold bg-black flex items-center justify-center text-zeus-gold font-bold animate-pulse-fast">
                                 <i className="fas fa-bolt"></i>
                             </div>
                             <div>
@@ -278,7 +311,7 @@ const App: React.FC = () => {
                     chat={currentChatId ? chats[currentChatId] : null}
                     onSendMessage={handleSendMessage}
                     isStreaming={isStreaming}
-                    onNewChat={createNewChat} // تمرير دالة إنشاء محادثة جديدة
+                    onNewChat={createNewChat} 
                 />
             </div>
 
@@ -290,6 +323,22 @@ const App: React.FC = () => {
                     onClose={() => setIsSettingsOpen(false)}
                 />
             )}
+
+            {/* مودال الحذف */}
+            <DeleteModal 
+                isOpen={activeModal === 'delete'} 
+                chatTitle={modalTargetId ? chats[modalTargetId]?.title : ''}
+                onClose={() => setActiveModal(null)}
+                onConfirm={confirmDeleteChat}
+            />
+
+            {/* مودال إعادة التسمية */}
+            <RenameModal
+                isOpen={activeModal === 'rename'}
+                initialTitle={modalTargetTitle}
+                onClose={() => setActiveModal(null)}
+                onRename={confirmRenameChat}
+            />
         </div>
     );
 };
