@@ -1,6 +1,6 @@
 {
-  "name": "Zeus Chat - God of Thunder",
-  "short_name": "Zeus",
+  "name": "ChatZEUS",
+  "short_name": "ChatZEUS",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
@@ -9,13 +9,13 @@
   "scope": "/",
   "icons": [
     {
-      "src": "https://ui-avatars.com/api/?name=Zeus&background=000000&color=FFD700&size=192&font-size=0.5&rounded=true&bold=true",
+      "src": "/logo.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "https://ui-avatars.com/api/?name=Zeus&background=000000&color=FFD700&size=512&font-size=0.5&rounded=true&bold=true",
+      "src": "/logo.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
