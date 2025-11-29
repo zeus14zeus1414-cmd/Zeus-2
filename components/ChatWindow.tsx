@@ -459,7 +459,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     }
 
     return (
-        <div className="flex-1 flex flex-col overflow-hidden mx-2 md:mx-4 mb-4 glass-gold rounded-2xl border border-zeus-gold/20 shadow-2xl relative">
+        <div className="flex-1 flex flex-col overflow-hidden md:mx-4 md:mb-4 glass-gold md:rounded-2xl border-0 md:border border-zeus-gold/20 shadow-none md:shadow-2xl relative">
             <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 md:space-y-8 custom-scrollbar scroll-smooth">
                 {isLoadingHistory && (
                     <div className="flex justify-center py-2">

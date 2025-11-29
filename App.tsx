@@ -270,7 +270,7 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className="relative flex flex-col h-full w-full bg-zeus-base text-white font-sans overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" dir="rtl">
+        <div className="relative flex flex-col h-[100dvh] w-full bg-zeus-base text-white font-sans overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" dir="rtl">
             
             {/* تراكب الموبايل */}
             {isSidebarOpen && (
