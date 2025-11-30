@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo, useLayoutEffect } from 'react';
-import { Chat, Attachment, Message } from '../types';
+import { Chat, Attachment, Message, MessageCollapsingOptions } from '../types';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 
@@ -8,62 +8,94 @@ interface Props {
     onSendMessage: (text: string, files: Attachment[], forceThink: boolean) => void;
     isStreaming: boolean;
     onNewChat: () => void;
-    onStop?: () => void; // إضافة خاصية الإيقاف
+    onStop?: () => void;
+    collapsingOptions: MessageCollapsingOptions;
 }
 
 const MAX_COLLAPSED_LENGTH = 350; 
-const MAX_COLLAPSED_LINES = 6;    
 const MESSAGES_BATCH_SIZE = 50;   
 
-const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }: { msg: Message, isLast: boolean, isStreaming: boolean, forceThinkEnabled: boolean }) => {
+const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, collapsingOptions }: { msg: Message, isLast: boolean, isStreaming: boolean, forceThinkEnabled: boolean, collapsingOptions: MessageCollapsingOptions }) => {
     const isUser = msg.role === 'user';
     const [isExpanded, setIsExpanded] = useState(false);
     
     const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
     
+    // منطق تحليل النص المحدث: فصل فوري ودقيق
     const parsedContent = useMemo(() => {
         const rawContent = msg.content || '';
-        const thinkRegex = /<(?:think|فكّر|تفكير)>([\s\S]*?)<\/(?:think|فكّر|تفكير)>/i;
-        const thinkMatch = rawContent.match(thinkRegex);
-        
+
+        // تعبيرات البحث عن الوسوم (عربي وإنجليزي)
+        const startTagRegex = /<(?:think|فكّر|تفكير)>/i;
+        const endTagRegex = /<\/(?:think|فكّر|تفكير)>/i;
+
+        const startMatch = rawContent.match(startTagRegex);
+
         let thinkContent = '';
         let finalAnswer = rawContent;
+        let isThinkingComplete = false;
 
-        if (thinkMatch) {
-            thinkContent = thinkMatch[1].trim();
-            finalAnswer = rawContent.replace(thinkRegex, '').trim();
-        } else if (isLast && isStreaming && !isUser) {
-             const openTagMatch = rawContent.match(/<(?:think|فكّر|تفكير)>/i);
-             if (openTagMatch) {
-                 const parts = rawContent.split(openTagMatch[0]);
-                 if (parts.length > 1) {
-                     thinkContent = parts[1].trim(); 
-                     finalAnswer = parts[0].trim();
-                 }
-             }
+        if (startMatch) {
+            const startIndex = startMatch.index! + startMatch[0].length;
+            const endMatch = rawContent.match(endTagRegex);
+
+            if (endMatch) {
+                // تم العثور على نهاية التفكير: نفصل فوراً
+                thinkContent = rawContent.slice(startIndex, endMatch.index).trim();
+                // الجواب هو كل شيء بعد وسم الإغلاق
+                finalAnswer = rawContent.slice(endMatch.index! + endMatch[0].length).trim();
+                isThinkingComplete = true;
+            } else {
+                // لم ينته التفكير بعد: كل النص هو تفكير
+                thinkContent = rawContent.slice(startIndex).trim();
+                finalAnswer = ''; // الجواب فارغ حالياً
+                isThinkingComplete = false;
+            }
+        } else {
+            // لا يوجد وسم تفكير أصلاً
+            isThinkingComplete = true; // نعتبر مرحلة التفكير "منتهية" أو غير موجودة
         }
+        
+        return { thinkContent, finalAnswer, isThinkingComplete, hasStartTag: !!startMatch };
+    }, [msg.content]);
 
-        return { thinkContent, finalAnswer };
-    }, [msg.content, isLast, isStreaming, isUser]);
+    const { thinkContent, finalAnswer, isThinkingComplete, hasStartTag } = parsedContent;
 
-    const { thinkContent, finalAnswer } = parsedContent;
-
+    // حالة: ننتظر أول حرف (سواء للتفكير أو الجواب)
     const isWaitingForFirstToken = !isUser && isLast && isStreaming && finalAnswer.length === 0 && thinkContent.length === 0;
 
-    const isDeepThinkMode = thinkContent.length > 0 || (isWaitingForFirstToken && forceThinkEnabled);
+    // حالة: وضع التفكير العميق مفعل (يوجد محتوى تفكير أو مجبر عليه وينتظر)
+    const isDeepThinkMode = hasStartTag || (isWaitingForFirstToken && forceThinkEnabled);
 
-    const loadingText = isDeepThinkMode ? 'جاري التفكير العميق...' : 'لحظة من فضلك...';
+    const hasFinalAnswer = finalAnswer.length > 0;
+    
+    // مرحلة التفكير النشط: نحن في آخر رسالة، وجاري البث، ولم نجد وسم الإغلاق بعد
+    // ملاحظة: بمجرد العثور على وسم الإغلاق، تتوقف هذه الحالة فوراً
+    const isThinkingPhase = !isUser && isLast && isStreaming && !isThinkingComplete;
 
+    // النص الذي يظهر في الهيدر
+    const loadingText = isThinkingPhase ? 'جاري التفكير العميق...' : 'لحظة من فضلك...';
+
+    // إظهار الهيدر إذا كان هناك تفكير أو ننتظر التفكير
     const showHeader = isDeepThinkMode || isWaitingForFirstToken;
 
-    const hasContent = finalAnswer.length > 0 || thinkContent.length > 0;
-    const showBody = isUser || hasContent;
+    // إظهار جسم الرسالة فقط إذا كان هناك جواب نهائي أو كانت رسالة مستخدم
+    // هام: نظهره فوراً بمجرد وجود أي نص في finalAnswer حتى لو حرف واحد
+    const showBody = isUser || hasFinalAnswer;
 
     const shouldCollapse = useMemo(() => {
+        if (!collapsingOptions.enabled) return false;
+        if (collapsingOptions.targets === 'user' && !isUser) return false;
+        if (collapsingOptions.targets === 'assistant' && isUser) return false;
+        
+        // لا نطبق الطي أثناء تدفق الرد النهائي للمساعد
         if (isLast && isStreaming && !isUser) return false;
+
         const lines = finalAnswer.split('\n').length;
-        return finalAnswer.length > MAX_COLLAPSED_LENGTH || lines > MAX_COLLAPSED_LINES;
-    }, [finalAnswer, isLast, isStreaming, isUser]);
+        const threshold = collapsingOptions.thresholdLines || 4;
+        
+        return finalAnswer.length > MAX_COLLAPSED_LENGTH || lines > threshold;
+    }, [finalAnswer, isLast, isStreaming, isUser, collapsingOptions]);
 
     const htmlContent = useMemo(() => {
         let content = finalAnswer || ' '; 
@@ -71,18 +103,17 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
             const snippet = content.slice(0, MAX_COLLAPSED_LENGTH);
             return marked.parse(snippet + '...') as string;
         }
-        if (!isUser && isLast && isStreaming) {
+        // إضافة مؤشر الكتابة فقط إذا كنا نبث الجواب النهائي
+        if (!isUser && isLast && isStreaming && isThinkingComplete) {
             content += ' <span class="zeus-cursor-inline"></span>';
         }
         return marked.parse(content) as string;
-    }, [finalAnswer, isLast, isStreaming, isUser, shouldCollapse, isExpanded]);
+    }, [finalAnswer, isLast, isStreaming, isUser, shouldCollapse, isExpanded, isThinkingComplete]);
 
     const thinkHtmlContent = useMemo(() => {
         if (!thinkContent) return '';
         return marked.parse(thinkContent) as string;
     }, [thinkContent]);
-
-    const isProcessing = !isUser && isLast && isStreaming;
 
     return (
         <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} group animate-fade-in px-1`}>
@@ -102,13 +133,18 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
                         {showHeader && (
                             <div 
                                 className={`flex items-center gap-3 transition-all duration-300
-                                    ${!isProcessing && isDeepThinkMode ? 'cursor-pointer hover:bg-white/5 rounded-lg -mx-2 px-2 py-1' : ''}
+                                    ${!isThinkingPhase ? 'cursor-pointer hover:bg-white/5 rounded-lg -mx-2 px-2 py-1' : ''}
                                     ${isWaitingForFirstToken ? 'mb-0' : 'mb-3'}
                                 `}
-                                onClick={() => (!isProcessing && isDeepThinkMode) && setIsThinkingExpanded(!isThinkingExpanded)}
+                                onClick={() => {
+                                    // السماح بالضغط بمجرد انتهاء مرحلة التفكير (ظهور وسم الإغلاق)
+                                    if (!isThinkingPhase) {
+                                        setIsThinkingExpanded(!isThinkingExpanded);
+                                    }
+                                }}
                             >
                                 <div className="relative w-6 h-6 flex items-center justify-center flex-shrink-0">
-                                    {isProcessing ? (
+                                    {isThinkingPhase ? (
                                         <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50">
                                             <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="animate-dash-flow" strokeDasharray="28 6 28 6 28 30" />
                                         </svg>
@@ -119,15 +155,15 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
                                 </div>
 
                                 <div className="flex flex-col">
-                                    <span className={`text-sm font-bold transition-all whitespace-nowrap ${isProcessing ? 'text-zeus-gold animate-pulse' : 'text-gray-300'}`}>
-                                        {isProcessing 
+                                    <span className={`text-sm font-bold transition-all whitespace-nowrap ${isThinkingPhase ? 'text-zeus-gold animate-pulse' : 'text-gray-300'}`}>
+                                        {isThinkingPhase 
                                             ? loadingText
                                             : (isDeepThinkMode ? 'عرض طريقة التفكير' : '')
                                         }
                                     </span>
                                 </div>
 
-                                {!isProcessing && isDeepThinkMode && (
+                                {!isThinkingPhase && isDeepThinkMode && (
                                     <i className={`fas fa-chevron-down text-xs text-gray-500 mr-auto transition-transform duration-300 ${isThinkingExpanded ? 'rotate-180' : ''}`}></i>
                                 )}
                             </div>
@@ -200,7 +236,7 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
                     </button>
                 )}
                 
-                {(isUser || hasContent) && (
+                {(isUser || hasFinalAnswer) && (
                     <div className="mt-2 pt-2 border-t border-white/5 flex justify-between items-center gap-2 select-none">
                         <span className="text-[9px] md:text-[11px] text-gray-600 font-mono opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity duration-300" dir="ltr">
                             {new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
@@ -225,11 +261,12 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled }:
         prevProps.msg.content === nextProps.msg.content &&
         prevProps.isLast === nextProps.isLast &&
         prevProps.isStreaming === nextProps.isStreaming &&
-        prevProps.forceThinkEnabled === nextProps.forceThinkEnabled
+        prevProps.forceThinkEnabled === nextProps.forceThinkEnabled &&
+        JSON.stringify(prevProps.collapsingOptions) === JSON.stringify(nextProps.collapsingOptions)
     );
 });
 
-const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewChat, onStop }) => {
+const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewChat, onStop, collapsingOptions }) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [inputValue, setInputValue] = useState('');
@@ -459,6 +496,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                         isLast={idx === displayedMessages.length - 1} 
                         isStreaming={isStreaming} 
                         forceThinkEnabled={isThinkingEnabled} 
+                        collapsingOptions={collapsingOptions}
                     />
                 ))}
                 <div ref={messagesEndRef} />
@@ -516,7 +554,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
 
                     {isStreaming ? (
                         <button 
-                            onClick={onStop} // استدعاء دالة الإيقاف
+                            onClick={onStop}
                             className="h-11 w-11 md:h-14 md:w-14 transition-all duration-300 flex-shrink-0 flex items-center justify-center border-r border-zeus-gold/30 text-red-500 hover:bg-red-500/10 hover:text-red-400"
                             title="إيقاف التوليد"
                         >

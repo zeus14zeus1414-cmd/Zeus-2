@@ -17,7 +17,12 @@ const defaultSettings: Settings = {
     customPrompt: '',
     apiKeyRetryStrategy: 'sequential',
     fontSize: 18,
-    thinkingBudget: 1024 
+    thinkingBudget: 1024,
+    messageCollapsing: {
+        enabled: true,
+        targets: 'user', // الافتراضي: طي رسائل المستخدم فقط
+        thresholdLines: 4
+    }
 };
 
 const App: React.FC = () => {
@@ -42,7 +47,18 @@ const App: React.FC = () => {
             const loadedSettings = localStorage.getItem('zeusSettings');
             
             if (loadedChats) setChats(JSON.parse(loadedChats));
-            if (loadedSettings) setSettings({ ...defaultSettings, ...JSON.parse(loadedSettings) });
+            if (loadedSettings) {
+                const parsed = JSON.parse(loadedSettings);
+                // دمج الإعدادات المحفوظة مع الافتراضية لضمان وجود الحقول الجديدة
+                setSettings({ 
+                    ...defaultSettings, 
+                    ...parsed,
+                    messageCollapsing: {
+                        ...defaultSettings.messageCollapsing,
+                        ...(parsed.messageCollapsing || {})
+                    }
+                });
+            }
         } catch (e) {
             console.error("فشل في تحميل البيانات", e);
         }
@@ -356,7 +372,8 @@ const App: React.FC = () => {
                         onSendMessage={handleSendMessage}
                         isStreaming={isStreaming}
                         onNewChat={createNewChat} 
-                        onStop={handleStopGeneration} // تمرير دالة الإيقاف
+                        onStop={handleStopGeneration} 
+                        collapsingOptions={settings.messageCollapsing} // تمرير خيارات الطي
                     />
                 </div>
             </div>

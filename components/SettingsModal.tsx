@@ -10,7 +10,7 @@ interface Props {
 
 const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
     const [localSettings, setLocalSettings] = useState<Settings>(settings);
-    const [activeTab, setActiveTab] = useState<'general' | 'keys' | 'custom_providers' | 'custom_models'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'display' | 'keys' | 'custom_providers' | 'custom_models'>('general');
     const [isClosing, setIsClosing] = useState(false);
     
     // حالة للإضافة المتعددة للمفاتيح
@@ -245,6 +245,7 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                 <div className="flex border-b border-zeus-gold/10 px-6 bg-black/40 overflow-x-auto">
                     {[
                         {id: 'general', icon: 'fa-cog', label: 'عام'},
+                        {id: 'display', icon: 'fa-eye', label: 'العرض'}, // تبويب العرض الجديد
                         {id: 'keys', icon: 'fa-key', label: 'المفاتيح'},
                         {id: 'custom_providers', icon: 'fa-server', label: 'المزودون'},
                         {id: 'custom_models', icon: 'fa-brain', label: 'النماذج'}
@@ -346,7 +347,22 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                                     <span>64k</span>
                                 </div>
                             </div>
-                            
+
+                            <div className="space-y-2">
+                                <label className="text-sm font-bold text-gray-300">تعليمات النظام (الشخصية)</label>
+                                <textarea 
+                                    value={localSettings.customPrompt}
+                                    onChange={(e) => setLocalSettings({...localSettings, customPrompt: e.target.value})}
+                                    className="w-full bg-black/60 border border-zeus-gold/20 rounded-lg p-3 text-white h-24 resize-none focus:border-zeus-gold focus:outline-none"
+                                    placeholder="أنت زيوس، إله الرعد، تتحدث بحكمة وقوة..."
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'display' && (
+                        <div className="space-y-8 animate-fade-in">
+                             {/* قسم حجم الخط */}
                             <div className="space-y-2">
                                 <label className="text-sm font-bold text-gray-300 flex justify-between">
                                     <span>حجم الخط</span>
@@ -360,14 +376,68 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                                 />
                             </div>
 
-                            <div className="space-y-2">
-                                <label className="text-sm font-bold text-gray-300">تعليمات النظام (الشخصية)</label>
-                                <textarea 
-                                    value={localSettings.customPrompt}
-                                    onChange={(e) => setLocalSettings({...localSettings, customPrompt: e.target.value})}
-                                    className="w-full bg-black/60 border border-zeus-gold/20 rounded-lg p-3 text-white h-24 resize-none focus:border-zeus-gold focus:outline-none"
-                                    placeholder="أنت زيوس، إله الرعد، تتحدث بحكمة وقوة..."
-                                />
+                            {/* قسم طي الرسائل */}
+                            <div className="space-y-4 pt-4 border-t border-white/5">
+                                <div className="flex justify-between items-center">
+                                    <label className="text-sm font-bold text-gray-300 flex items-center gap-2">
+                                        <i className="fas fa-compress-alt text-zeus-gold"></i> طي الرسائل الطويلة
+                                    </label>
+                                    <button 
+                                        onClick={() => setLocalSettings({
+                                            ...localSettings, 
+                                            messageCollapsing: { ...localSettings.messageCollapsing, enabled: !localSettings.messageCollapsing.enabled }
+                                        })}
+                                        className={`relative w-11 h-6 rounded-full transition-colors ${localSettings.messageCollapsing.enabled ? 'bg-zeus-gold' : 'bg-gray-700'}`}
+                                    >
+                                        <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${localSettings.messageCollapsing.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+                                
+                                {localSettings.messageCollapsing.enabled && (
+                                    <div className="p-4 bg-black/40 border border-white/5 rounded-xl space-y-4 animate-fade-in">
+                                        <div className="space-y-2">
+                                            <label className="text-xs text-gray-400">تطبيق الطي على:</label>
+                                            <div className="flex gap-2">
+                                                {[
+                                                    { value: 'user', label: 'رسائل المستخدم فقط' },
+                                                    { value: 'assistant', label: 'رسائل الذكاء الاصطناعي' },
+                                                    { value: 'both', label: 'الجميع' }
+                                                ].map((opt) => (
+                                                    <button
+                                                        key={opt.value}
+                                                        onClick={() => setLocalSettings({
+                                                            ...localSettings,
+                                                            messageCollapsing: { ...localSettings.messageCollapsing, targets: opt.value as any }
+                                                        })}
+                                                        className={`flex-1 py-2 text-xs rounded-lg border transition-all ${
+                                                            localSettings.messageCollapsing.targets === opt.value 
+                                                                ? 'bg-zeus-gold/20 text-zeus-gold border-zeus-gold/50' 
+                                                                : 'bg-black/20 text-gray-500 border-white/5 hover:bg-white/5'
+                                                        }`}
+                                                    >
+                                                        {opt.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-xs text-gray-400 flex justify-between">
+                                                <span>الحد الأقصى للأسطر قبل الطي</span>
+                                                <span className="text-zeus-gold">{localSettings.messageCollapsing.thresholdLines} أسطر</span>
+                                            </label>
+                                            <input 
+                                                type="range" min="2" max="20" step="1"
+                                                value={localSettings.messageCollapsing.thresholdLines}
+                                                onChange={(e) => setLocalSettings({
+                                                    ...localSettings,
+                                                    messageCollapsing: { ...localSettings.messageCollapsing, thresholdLines: parseInt(e.target.value) }
+                                                })}
+                                                className="w-full accent-zeus-gold h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
