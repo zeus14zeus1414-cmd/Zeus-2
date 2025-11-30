@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useMemo, useLayoutEffect } from 're
 import { Chat, Attachment, Message, Settings } from '../types';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
+import AttachmentModal from './AttachmentModal';
 
 interface Props {
     chat: Chat | null;
@@ -14,7 +15,14 @@ interface Props {
 
 const MAX_COLLAPSED_LENGTH_CHARS = 350; // Fallback value
 
-const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, settings }: { msg: Message, isLast: boolean, isStreaming: boolean, forceThinkEnabled: boolean, settings: Settings }) => {
+const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, settings, onAttachmentClick }: { 
+    msg: Message, 
+    isLast: boolean, 
+    isStreaming: boolean, 
+    forceThinkEnabled: boolean, 
+    settings: Settings,
+    onAttachmentClick: (att: Attachment) => void 
+}) => {
     const isUser = msg.role === 'user';
     const [isExpanded, setIsExpanded] = useState(false);
     
@@ -188,17 +196,43 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                 )}
 
                 {msg.attachments && msg.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-4 justify-end">
+                    <div className="flex flex-wrap gap-3 mb-5 justify-end w-full">
                         {msg.attachments.map((att, i) => (
-                            <div key={i} className="bg-black/60 rounded-lg p-2 flex items-center gap-2 border border-zeus-gold/20 hover:border-zeus-gold/50 transition-colors max-w-full">
+                            <div key={i} className="animate-scale-up" style={{animationDelay: `${i * 100}ms`}}>
                                 {att.dataType === 'image' ? (
-                                        <div className="w-20 h-20 rounded overflow-hidden relative group/img cursor-pointer">
-                                            <img src={`data:${att.mimeType};base64,${att.content}`} className="w-full h-full object-cover transition-transform group-hover/img:scale-110" alt={att.name} />
+                                    <div 
+                                        onClick={() => onAttachmentClick(att)}
+                                        className="relative w-32 h-32 md:w-48 md:h-48 rounded-2xl overflow-hidden group/img cursor-pointer border border-white/10 shadow-lg transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_20px_rgba(255,215,0,0.15)] bg-black/50"
+                                    >
+                                        <img src={`data:${att.mimeType};base64,${att.content}`} className="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110" alt={att.name} />
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover/img:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4">
+                                            <div className="flex items-center gap-2 px-3 py-1 bg-black/60 backdrop-blur-sm rounded-full border border-white/10 text-xs text-white">
+                                                <i className="fas fa-eye text-zeus-gold"></i>
+                                                <span>عرض</span>
+                                            </div>
                                         </div>
+                                        {/* Badge Type */}
+                                        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/10">
+                                            <i className="fas fa-image text-[10px] text-zeus-gold"></i>
+                                        </div>
+                                    </div>
                                 ) : (
-                                    <div className="flex items-center gap-2 text-sm text-zeus-electric overflow-hidden">
-                                        <i className="fas fa-file-code flex-shrink-0"></i>
-                                        <span className="truncate" dir="ltr">{att.name}</span>
+                                    <div 
+                                        onClick={() => onAttachmentClick(att)}
+                                        className="group/file cursor-pointer flex items-center gap-3 bg-[#111] hover:bg-zeus-gold/5 border border-white/10 hover:border-zeus-gold/30 rounded-2xl p-3 md:p-4 transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,215,0,0.05)] hover:-translate-y-1 min-w-[200px] md:min-w-[240px] max-w-full"
+                                    >
+                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-gray-800 to-black flex items-center justify-center text-zeus-electric border border-white/5 group-hover/file:border-zeus-gold/20 group-hover/file:scale-110 transition-all duration-300 shadow-inner">
+                                            <i className="fas fa-file-code text-2xl group-hover/file:text-zeus-gold transition-colors"></i>
+                                        </div>
+                                        <div className="flex flex-col min-w-0 flex-1">
+                                            <span className="text-sm font-bold text-gray-200 truncate w-full" dir="ltr">{att.name}</span>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <span className="text-[10px] text-gray-500 bg-white/5 px-2 py-0.5 rounded-full font-mono">{(att.size / 1024).toFixed(1)} KB</span>
+                                                <span className="text-[10px] text-zeus-gold opacity-0 group-hover/file:opacity-100 transition-opacity duration-300 flex items-center gap-1">
+                                                    <i className="fas fa-external-link-alt text-[8px]"></i> فتح
+                                                </span>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -275,6 +309,9 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [showScrollButton, setShowScrollButton] = useState(false);
     
+    // State for viewing attachments
+    const [viewingAttachment, setViewingAttachment] = useState<Attachment | null>(null);
+
     // مرجع للتحقق مما إذا كان المستخدم في أسفل الصفحة
     const isAtBottomRef = useRef(true);
 
@@ -512,6 +549,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                         isStreaming={isStreaming} 
                         forceThinkEnabled={isThinkingEnabled} 
                         settings={settings}
+                        onAttachmentClick={setViewingAttachment}
                     />
                 ))}
                 <div ref={messagesEndRef} />
@@ -590,6 +628,11 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                     زيوس قد يخطئ، راجع المعلومات المهمة.
                 </div>
             </div>
+
+            <AttachmentModal 
+                attachment={viewingAttachment} 
+                onClose={() => setViewingAttachment(null)} 
+            />
         </div>
     );
 }
