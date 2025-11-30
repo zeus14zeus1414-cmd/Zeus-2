@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo, useLayoutEffect } from 'react';
-import { Chat, Attachment, Message, MessageCollapsingOptions } from '../types';
+import { Chat, Attachment, Message, Settings } from '../types';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 
@@ -8,112 +8,138 @@ interface Props {
     onSendMessage: (text: string, files: Attachment[], forceThink: boolean) => void;
     isStreaming: boolean;
     onNewChat: () => void;
-    onStop?: () => void;
-    collapsingOptions: MessageCollapsingOptions;
+    onStop?: () => void; // إضافة خاصية الإيقاف
+    settings: Settings; // استقبال الإعدادات
 }
 
-const MAX_COLLAPSED_LENGTH = 350; 
-const MESSAGES_BATCH_SIZE = 50;   
+const MAX_COLLAPSED_LENGTH_CHARS = 350; // Fallback value
 
-const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, collapsingOptions }: { msg: Message, isLast: boolean, isStreaming: boolean, forceThinkEnabled: boolean, collapsingOptions: MessageCollapsingOptions }) => {
+const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, settings }: { msg: Message, isLast: boolean, isStreaming: boolean, forceThinkEnabled: boolean, settings: Settings }) => {
     const isUser = msg.role === 'user';
     const [isExpanded, setIsExpanded] = useState(false);
     
     const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
     
-    // منطق تحليل النص المحدث: فصل فوري ودقيق
     const parsedContent = useMemo(() => {
-        const rawContent = msg.content || '';
-
-        // تعبيرات البحث عن الوسوم (عربي وإنجليزي)
-        const startTagRegex = /<(?:think|فكّر|تفكير)>/i;
-        const endTagRegex = /<\/(?:think|فكّر|تفكير)>/i;
-
-        const startMatch = rawContent.match(startTagRegex);
-
+        let text = msg.content || '';
         let thinkContent = '';
-        let finalAnswer = rawContent;
-        let isThinkingComplete = false;
-
-        if (startMatch) {
-            const startIndex = startMatch.index! + startMatch[0].length;
-            const endMatch = rawContent.match(endTagRegex);
-
-            if (endMatch) {
-                // تم العثور على نهاية التفكير: نفصل فوراً
-                thinkContent = rawContent.slice(startIndex, endMatch.index).trim();
-                // الجواب هو كل شيء بعد وسم الإغلاق
-                finalAnswer = rawContent.slice(endMatch.index! + endMatch[0].length).trim();
-                isThinkingComplete = true;
-            } else {
-                // لم ينته التفكير بعد: كل النص هو تفكير
-                thinkContent = rawContent.slice(startIndex).trim();
-                finalAnswer = ''; // الجواب فارغ حالياً
-                isThinkingComplete = false;
-            }
-        } else {
-            // لا يوجد وسم تفكير أصلاً
-            isThinkingComplete = true; // نعتبر مرحلة التفكير "منتهية" أو غير موجودة
+        
+        // 1. التعامل مع الكتل المكتملة (التي لها بداية ونهاية)
+        // نستخدم تعبير نمطي للبحث عن كل الكتل المغلقة <think>...</think> بغض النظر عن محتواها
+        const completeThinkRegex = /<(?:think|فكّر|تفكير)>([\s\S]*?)<\/(?:think|فكّر|تفكير)>/gi;
+        
+        // استخراج جميع كتل التفكير المكتملة وتجميعها
+        let match;
+        while ((match = completeThinkRegex.exec(text)) !== null) {
+            thinkContent += (thinkContent ? '\n\n---\n\n' : '') + match[1].trim();
         }
         
-        return { thinkContent, finalAnswer, isThinkingComplete, hasStartTag: !!startMatch };
-    }, [msg.content]);
+        // حذف الكتل المكتملة من النص الأصلي للحصول على الرد الفعلي المبدئي
+        let finalAnswer = text.replace(completeThinkRegex, '').trim();
+        
+        // 2. التعامل مع الكتل غير المكتملة (أثناء الـ Streaming أو إذا أخطأ الموديل)
+        const openTagRegex = /<(?:think|فكّر|تفكير)>/i;
+        const openMatch = finalAnswer.match(openTagRegex);
+        
+        if (openMatch) {
+            // كل ما بعد وسم الفتح هو تفكير جاري (مبدئياً)
+            const potentialThink = finalAnswer.slice(openMatch.index! + openMatch[0].length);
+            
+            // تحديث: منطق الإنقاذ (Rescue Logic)
+            // إذا انتهى الستريمنج (isStreaming === false) ولم نجد وسم إغلاق
+            // فهذا يعني أن الموديل نسي الإغلاق وبدأ في الإجابة داخل التفكير
+            if (isLast && !isStreaming) {
+                // محاولة ذكية للعثور على نقطة الفصل
+                // عادة ما يفصل الموديل بين التفكير والإجابة بأسطر فارغة مزدوجة
+                const splitParts = potentialThink.split(/\n\s*\n/);
+                
+                if (splitParts.length > 1) {
+                    // نفترض أن الجزء الأخير هو الإجابة وباقي الأجزاء هي التفكير
+                    // (خاصة إذا كان الجزء الأخير طويلاً نسبياً)
+                    const lastPart = splitParts[splitParts.length - 1];
+                    const thoughtPart = splitParts.slice(0, -1).join('\n\n');
+                    
+                    thinkContent += (thinkContent ? '\n' : '') + thoughtPart;
+                    finalAnswer = finalAnswer.slice(0, openMatch.index) + lastPart.trim(); // نحتفظ بما قبل التفكير + الرد المستخلص
+                } else {
+                    // إذا فشلنا في الفصل، نعتبر كل شيء تفكيراً للحفاظ على الأمان، 
+                    // أو يمكننا اعتبار النص كله إجابة إذا كان طويلاً جداً.
+                    // هنا سنبقيه تفكيراً لكن المستخدم يمكنه رؤيته عند فتح القائمة
+                    thinkContent += (thinkContent ? '\n' : '') + potentialThink;
+                    finalAnswer = finalAnswer.slice(0, openMatch.index).trim();
+                }
+            } else {
+                // أثناء الستريمنج، نعتبر كل شيء تفكيراً حتى يثبت العكس
+                thinkContent += (thinkContent ? '\n' : '') + potentialThink;
+                finalAnswer = finalAnswer.slice(0, openMatch.index).trim();
+            }
+        }
 
-    const { thinkContent, finalAnswer, isThinkingComplete, hasStartTag } = parsedContent;
+        // تنظيف النتائج
+        thinkContent = thinkContent.trim();
+        
+        // حالة خاصة: إذا كان الرد فارغاً تماماً (لأن كل شيء ابتلعه التفكير) والستريمنج انتهى
+        // فهذا خطأ واضح من الموديل، نقوم بإظهار التفكير "كإجابة" لكي لا تظهر فقاعة فارغة
+        if (isLast && !isStreaming && !isUser && finalAnswer.length === 0 && thinkContent.length > 0) {
+            // هذا التعديل يحل مشكلة "الرد داخل الفقاعة" بشكل نهائي
+            // إذا لم يكن هناك إجابة مفصولة، نعتبر المحتوى كله إجابة ونلغي وضع التفكير لهذا الرد
+             finalAnswer = thinkContent;
+             thinkContent = '';
+        }
 
-    // حالة: ننتظر أول حرف (سواء للتفكير أو الجواب)
+        return { thinkContent, finalAnswer };
+    }, [msg.content, isLast, isStreaming, isUser]);
+
+    const { thinkContent, finalAnswer } = parsedContent;
+
     const isWaitingForFirstToken = !isUser && isLast && isStreaming && finalAnswer.length === 0 && thinkContent.length === 0;
 
-    // حالة: وضع التفكير العميق مفعل (يوجد محتوى تفكير أو مجبر عليه وينتظر)
-    const isDeepThinkMode = hasStartTag || (isWaitingForFirstToken && forceThinkEnabled);
+    const isDeepThinkMode = thinkContent.length > 0 || (isWaitingForFirstToken && forceThinkEnabled);
 
-    const hasFinalAnswer = finalAnswer.length > 0;
-    
-    // مرحلة التفكير النشط: نحن في آخر رسالة، وجاري البث، ولم نجد وسم الإغلاق بعد
-    // ملاحظة: بمجرد العثور على وسم الإغلاق، تتوقف هذه الحالة فوراً
-    const isThinkingPhase = !isUser && isLast && isStreaming && !isThinkingComplete;
+    const loadingText = isDeepThinkMode ? 'جاري التفكير العميق...' : 'لحظة من فضلك...';
 
-    // النص الذي يظهر في الهيدر
-    const loadingText = isThinkingPhase ? 'جاري التفكير العميق...' : 'لحظة من فضلك...';
-
-    // إظهار الهيدر إذا كان هناك تفكير أو ننتظر التفكير
     const showHeader = isDeepThinkMode || isWaitingForFirstToken;
 
-    // إظهار جسم الرسالة فقط إذا كان هناك جواب نهائي أو كانت رسالة مستخدم
-    // هام: نظهره فوراً بمجرد وجود أي نص في finalAnswer حتى لو حرف واحد
-    const showBody = isUser || hasFinalAnswer;
+    const hasContent = finalAnswer.length > 0 || thinkContent.length > 0;
+    const showBody = isUser || hasContent;
 
+    // منطق الطي المحسن بناءً على الإعدادات
     const shouldCollapse = useMemo(() => {
-        if (!collapsingOptions.enabled) return false;
-        if (collapsingOptions.targets === 'user' && !isUser) return false;
-        if (collapsingOptions.targets === 'assistant' && isUser) return false;
-        
-        // لا نطبق الطي أثناء تدفق الرد النهائي للمساعد
+        // إذا كان الطي معطلاً بالكامل
+        if (!settings.collapseLongMessages) return false;
+
+        // التحقق من الهدف المحدد للطي
+        if (isUser && settings.collapseTarget === 'assistant') return false;
+        if (!isUser && settings.collapseTarget === 'user') return false;
+
+        // لا نقوم بالطي أثناء الستريمنج للنموذج لتجنب القفزات المزعجة
         if (isLast && isStreaming && !isUser) return false;
 
         const lines = finalAnswer.split('\n').length;
-        const threshold = collapsingOptions.thresholdLines || 4;
-        
-        return finalAnswer.length > MAX_COLLAPSED_LENGTH || lines > threshold;
-    }, [finalAnswer, isLast, isStreaming, isUser, collapsingOptions]);
+        // استخدام القيمة من الإعدادات
+        return finalAnswer.length > MAX_COLLAPSED_LENGTH_CHARS || lines > settings.maxCollapseLines;
+    }, [finalAnswer, isLast, isStreaming, isUser, settings]);
 
     const htmlContent = useMemo(() => {
         let content = finalAnswer || ' '; 
         if (shouldCollapse && !isExpanded) {
-            const snippet = content.slice(0, MAX_COLLAPSED_LENGTH);
+            // قص المحتوى للعرض المختصر
+            const lines = content.split('\n');
+            const snippet = lines.slice(0, settings.maxCollapseLines).join('\n').slice(0, MAX_COLLAPSED_LENGTH_CHARS);
             return marked.parse(snippet + '...') as string;
         }
-        // إضافة مؤشر الكتابة فقط إذا كنا نبث الجواب النهائي
-        if (!isUser && isLast && isStreaming && isThinkingComplete) {
+        if (!isUser && isLast && isStreaming) {
             content += ' <span class="zeus-cursor-inline"></span>';
         }
         return marked.parse(content) as string;
-    }, [finalAnswer, isLast, isStreaming, isUser, shouldCollapse, isExpanded, isThinkingComplete]);
+    }, [finalAnswer, isLast, isStreaming, isUser, shouldCollapse, isExpanded, settings]);
 
     const thinkHtmlContent = useMemo(() => {
         if (!thinkContent) return '';
         return marked.parse(thinkContent) as string;
     }, [thinkContent]);
+
+    const isProcessing = !isUser && isLast && isStreaming;
 
     return (
         <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} group animate-fade-in px-1`}>
@@ -133,18 +159,13 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, c
                         {showHeader && (
                             <div 
                                 className={`flex items-center gap-3 transition-all duration-300
-                                    ${!isThinkingPhase ? 'cursor-pointer hover:bg-white/5 rounded-lg -mx-2 px-2 py-1' : ''}
+                                    ${!isProcessing && isDeepThinkMode ? 'cursor-pointer hover:bg-white/5 rounded-lg -mx-2 px-2 py-1' : ''}
                                     ${isWaitingForFirstToken ? 'mb-0' : 'mb-3'}
                                 `}
-                                onClick={() => {
-                                    // السماح بالضغط بمجرد انتهاء مرحلة التفكير (ظهور وسم الإغلاق)
-                                    if (!isThinkingPhase) {
-                                        setIsThinkingExpanded(!isThinkingExpanded);
-                                    }
-                                }}
+                                onClick={() => (!isProcessing && isDeepThinkMode) && setIsThinkingExpanded(!isThinkingExpanded)}
                             >
                                 <div className="relative w-6 h-6 flex items-center justify-center flex-shrink-0">
-                                    {isThinkingPhase ? (
+                                    {isProcessing ? (
                                         <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50">
                                             <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="animate-dash-flow" strokeDasharray="28 6 28 6 28 30" />
                                         </svg>
@@ -155,15 +176,15 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, c
                                 </div>
 
                                 <div className="flex flex-col">
-                                    <span className={`text-sm font-bold transition-all whitespace-nowrap ${isThinkingPhase ? 'text-zeus-gold animate-pulse' : 'text-gray-300'}`}>
-                                        {isThinkingPhase 
+                                    <span className={`text-sm font-bold transition-all whitespace-nowrap ${isProcessing ? 'text-zeus-gold animate-pulse' : 'text-gray-300'}`}>
+                                        {isProcessing 
                                             ? loadingText
                                             : (isDeepThinkMode ? 'عرض طريقة التفكير' : '')
                                         }
                                     </span>
                                 </div>
 
-                                {!isThinkingPhase && isDeepThinkMode && (
+                                {!isProcessing && isDeepThinkMode && (
                                     <i className={`fas fa-chevron-down text-xs text-gray-500 mr-auto transition-transform duration-300 ${isThinkingExpanded ? 'rotate-180' : ''}`}></i>
                                 )}
                             </div>
@@ -236,7 +257,7 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, c
                     </button>
                 )}
                 
-                {(isUser || hasFinalAnswer) && (
+                {(isUser || hasContent) && (
                     <div className="mt-2 pt-2 border-t border-white/5 flex justify-between items-center gap-2 select-none">
                         <span className="text-[9px] md:text-[11px] text-gray-600 font-mono opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity duration-300" dir="ltr">
                             {new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
@@ -262,11 +283,14 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, c
         prevProps.isLast === nextProps.isLast &&
         prevProps.isStreaming === nextProps.isStreaming &&
         prevProps.forceThinkEnabled === nextProps.forceThinkEnabled &&
-        JSON.stringify(prevProps.collapsingOptions) === JSON.stringify(nextProps.collapsingOptions)
+        prevProps.settings.collapseLongMessages === nextProps.settings.collapseLongMessages &&
+        prevProps.settings.collapseTarget === nextProps.settings.collapseTarget &&
+        prevProps.settings.maxCollapseLines === nextProps.settings.maxCollapseLines &&
+        prevProps.settings.fontSize === nextProps.settings.fontSize
     );
 });
 
-const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewChat, onStop, collapsingOptions }) => {
+const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewChat, onStop, settings }) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [inputValue, setInputValue] = useState('');
@@ -277,25 +301,28 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [showScrollButton, setShowScrollButton] = useState(false);
     
+    // مرجع للتحقق مما إذا كان المستخدم في أسفل الصفحة
     const isAtBottomRef = useRef(true);
 
-    const [visibleCount, setVisibleCount] = useState(MESSAGES_BATCH_SIZE);
+    const [visibleCount, setVisibleCount] = useState(50);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const prevScrollHeightRef = useRef<number>(0);
 
     const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
         if (containerRef.current) {
+            // نستخدم scrollTo بدلاً من scrollIntoView للتحكم أفضل في السلوك
             containerRef.current.scrollTo({
                 top: containerRef.current.scrollHeight,
                 behavior: behavior
             });
+            // تحديث الحالة يدوياً لأن onScroll قد يتأخر
             isAtBottomRef.current = true;
             setShowScrollButton(false);
         }
     };
 
     useEffect(() => {
-        setVisibleCount(MESSAGES_BATCH_SIZE);
+        setVisibleCount(50);
         setIsLoadingHistory(false);
         setShowScrollButton(false);
         isAtBottomRef.current = true;
@@ -321,15 +348,19 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
         const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        
+        // زيادة حد التسامح قليلاً (100px) لضمان دقة الكشف
         const isAtBottom = distanceFromBottom < 100;
         isAtBottomRef.current = isAtBottom;
+        
+        // إظهار زر النزول إذا ابتعدنا كثيراً عن الأسفل
         setShowScrollButton(distanceFromBottom > 300);
 
         if (scrollTop === 0 && hasMoreHistory && !isLoadingHistory) {
             setIsLoadingHistory(true);
             prevScrollHeightRef.current = scrollHeight;
             setTimeout(() => {
-                setVisibleCount(prev => Math.min(prev + MESSAGES_BATCH_SIZE, chat!.messages.length));
+                setVisibleCount(prev => Math.min(prev + 50, chat!.messages.length));
                 setIsLoadingHistory(false);
             }, 300);
         }
@@ -347,11 +378,21 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const lastMessage = displayedMessages[displayedMessages.length - 1];
     const lastMessageContentLength = lastMessage?.content?.length || 0;
 
+    // التأثير المسؤول عن التمرير التلقائي أثناء الكتابة أو البث
     useEffect(() => {
-        if (!isLoadingHistory && isAtBottomRef.current) {
-             scrollToBottom('smooth');
+        if (chat && chat.messages.length > 0) {
+            // إذا كنا في وضع البث وكان المستخدم في الأسفل، استخدم تمرير فوري (auto/instant)
+            // التمرير الفوري يمنع التذبذب الذي يحدث مع التمرير السلس أثناء التحديثات السريعة
+            if (isStreaming) {
+                if (isAtBottomRef.current) {
+                    scrollToBottom('auto'); 
+                }
+            } else if (isAtBottomRef.current) {
+                // إذا لم يكن بثاً (رسالة جديدة كاملة) وكان المستخدم في الأسفل، استخدم تمرير سلس
+                scrollToBottom('smooth');
+            }
         }
-    }, [lastMessageContentLength, isStreaming, isLoadingHistory, displayedMessages.length]);
+    }, [lastMessageContentLength, isStreaming, displayedMessages.length]);
 
     const adjustTextareaHeight = () => {
         const textarea = textareaRef.current;
@@ -474,7 +515,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
 
     return (
         <div className="flex-1 flex flex-col overflow-hidden md:mx-4 md:mb-4 glass-gold md:rounded-2xl border-0 md:border border-zeus-gold/20 shadow-none md:shadow-2xl relative">
-            <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 md:space-y-8 custom-scrollbar scroll-smooth">
+            <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 md:space-y-8 custom-scrollbar">
                 {isLoadingHistory && (
                     <div className="flex justify-center py-2">
                         <div className="w-6 h-6 border-2 border-zeus-gold border-t-transparent rounded-full animate-spin"></div>
@@ -496,7 +537,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                         isLast={idx === displayedMessages.length - 1} 
                         isStreaming={isStreaming} 
                         forceThinkEnabled={isThinkingEnabled} 
-                        collapsingOptions={collapsingOptions}
+                        settings={settings}
                     />
                 ))}
                 <div ref={messagesEndRef} />
@@ -554,7 +595,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
 
                     {isStreaming ? (
                         <button 
-                            onClick={onStop}
+                            onClick={onStop} // استدعاء دالة الإيقاف
                             className="h-11 w-11 md:h-14 md:w-14 transition-all duration-300 flex-shrink-0 flex items-center justify-center border-r border-zeus-gold/30 text-red-500 hover:bg-red-500/10 hover:text-red-400"
                             title="إيقاف التوليد"
                         >
@@ -577,6 +618,5 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
             </div>
         </div>
     );
-};
-
+}
 export default ChatWindow;
