@@ -19,11 +19,17 @@ export const AI_MODELS = {
 // تم تبسيط التعليمات لتكون مجرد "تنسيق" فقط دون التدخل في عملية التفكير العقلية
 // هذا يمنع الموديل من الهلوسة بخصوص التعليمات
 const FORMAT_ONLY_INSTRUCTION = `
-Format your response as follows:
+IMPORTANT: You are in Deep Thinking Mode.
+1. You MUST start your response with a <think> block.
+2. Inside <think>, write your planning and reasoning steps (You can use English or Arabic here).
+3. CLOSE the block with </think> BEFORE writing the final answer.
+4. The final answer MUST be in the user's requested language.
+Example:
 <think>
-[Your internal reasoning process goes here]
+Analysis: The user wants a story...
+Plan: 1. Intro 2. Climax...
 </think>
-[Your final answer goes here]
+[Final Story Here]
 `;
 
 const NO_THINKING_INSTRUCTION = `
