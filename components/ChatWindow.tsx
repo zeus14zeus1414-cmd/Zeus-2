@@ -30,7 +30,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         
         // استخراج جميع كتل التفكير المكتملة وتجميعها
         let match;
-        // نستخدم while loop لضمان جمع كل كتل التفكير إذا كان هناك أكثر من واحدة
         while ((match = completeThinkRegex.exec(text)) !== null) {
             thinkContent += (thinkContent ? '\n\n---\n\n' : '') + match[1].trim();
         }
@@ -38,27 +37,54 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         // حذف الكتل المكتملة من النص الأصلي للحصول على الرد الفعلي المبدئي
         let finalAnswer = text.replace(completeThinkRegex, '').trim();
         
-        // 2. التعامل مع الكتل غير المكتملة (أثناء الـ Streaming)
-        // بما أننا حذفنا الكتل المكتملة، فإن وجود أي وسم فتح متبقي يعني أنه بداية لتفكير لم ينته بعد
+        // 2. التعامل مع الكتل غير المكتملة (أثناء الـ Streaming أو إذا أخطأ الموديل)
         const openTagRegex = /<(?:think|فكّر|تفكير)>/i;
         const openMatch = finalAnswer.match(openTagRegex);
         
         if (openMatch) {
-            // كل ما بعد وسم الفتح هو تفكير جاري
-            const pendingThink = finalAnswer.slice(openMatch.index! + openMatch[0].length);
-            thinkContent += (thinkContent ? '\n' : '') + pendingThink;
+            // كل ما بعد وسم الفتح هو تفكير جاري (مبدئياً)
+            const potentialThink = finalAnswer.slice(openMatch.index! + openMatch[0].length);
             
-            // الرد الفعلي هو ما قبل وسم الفتح
-            finalAnswer = finalAnswer.slice(0, openMatch.index).trim();
+            // تحديث: منطق الإنقاذ (Rescue Logic)
+            // إذا انتهى الستريمنج (isStreaming === false) ولم نجد وسم إغلاق
+            // فهذا يعني أن الموديل نسي الإغلاق وبدأ في الإجابة داخل التفكير
+            if (isLast && !isStreaming) {
+                // محاولة ذكية للعثور على نقطة الفصل
+                // عادة ما يفصل الموديل بين التفكير والإجابة بأسطر فارغة مزدوجة
+                const splitParts = potentialThink.split(/\n\s*\n/);
+                
+                if (splitParts.length > 1) {
+                    // نفترض أن الجزء الأخير هو الإجابة وباقي الأجزاء هي التفكير
+                    // (خاصة إذا كان الجزء الأخير طويلاً نسبياً)
+                    const lastPart = splitParts[splitParts.length - 1];
+                    const thoughtPart = splitParts.slice(0, -1).join('\n\n');
+                    
+                    thinkContent += (thinkContent ? '\n' : '') + thoughtPart;
+                    finalAnswer = finalAnswer.slice(0, openMatch.index) + lastPart.trim(); // نحتفظ بما قبل التفكير + الرد المستخلص
+                } else {
+                    // إذا فشلنا في الفصل، نعتبر كل شيء تفكيراً للحفاظ على الأمان، 
+                    // أو يمكننا اعتبار النص كله إجابة إذا كان طويلاً جداً.
+                    // هنا سنبقيه تفكيراً لكن المستخدم يمكنه رؤيته عند فتح القائمة
+                    thinkContent += (thinkContent ? '\n' : '') + potentialThink;
+                    finalAnswer = finalAnswer.slice(0, openMatch.index).trim();
+                }
+            } else {
+                // أثناء الستريمنج، نعتبر كل شيء تفكيراً حتى يثبت العكس
+                thinkContent += (thinkContent ? '\n' : '') + potentialThink;
+                finalAnswer = finalAnswer.slice(0, openMatch.index).trim();
+            }
         }
 
         // تنظيف النتائج
         thinkContent = thinkContent.trim();
         
-        // حالة خاصة: إذا كان الرد فارغاً تماماً ونحن في وضع الستريمنج
-        // قد يكون الموديل قد وضع وسم الفتح للتو، تم التعامل معها أعلاه، لكن للتأكيد
-        if (isLast && isStreaming && !isUser && finalAnswer.length === 0 && thinkContent.length === 0) {
-             // force logic checks outside
+        // حالة خاصة: إذا كان الرد فارغاً تماماً (لأن كل شيء ابتلعه التفكير) والستريمنج انتهى
+        // فهذا خطأ واضح من الموديل، نقوم بإظهار التفكير "كإجابة" لكي لا تظهر فقاعة فارغة
+        if (isLast && !isStreaming && !isUser && finalAnswer.length === 0 && thinkContent.length > 0) {
+            // هذا التعديل يحل مشكلة "الرد داخل الفقاعة" بشكل نهائي
+            // إذا لم يكن هناك إجابة مفصولة، نعتبر المحتوى كله إجابة ونلغي وضع التفكير لهذا الرد
+             finalAnswer = thinkContent;
+             thinkContent = '';
         }
 
         return { thinkContent, finalAnswer };
