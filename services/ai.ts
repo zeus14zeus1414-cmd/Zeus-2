@@ -16,18 +16,26 @@ export const AI_MODELS = {
     ]
 };
 
-// تم تبسيط التعليمات لتكون مجرد "تنسيق" فقط دون التدخل في عملية التفكير العقلية
-// هذا يمنع الموديل من الهلوسة بخصوص التعليمات
-const FORMAT_ONLY_INSTRUCTION = `
-Format your response as follows:
+const THINKING_SYSTEM_INSTRUCTION = `
+IMPORTANT: You are currently in "Deep Thinking Mode".
+1. Before answering, you MUST engage in a comprehensive, step-by-step reasoning process.
+2. You MUST enclose your internal monologue and reasoning process strictly within <think> and </think> tags.
+3. CRITICAL: Your internal reasoning (inside <think> tags) MUST BE IN ARABIC LANGUAGE only. Do not think in English.
+4. CRITICAL: You MUST use the exact tags <think> and </think>. Do NOT translate the tags themselves into Arabic (e.g., do NOT use <فكّر>).
+5. The content inside <think> tags will be displayed to the user as your "thought process".
+6. After the closing </think> tag, provide your final, polished answer to the user.
+7. Do NOT be lazy. Analyze the request deeply.
+Format your response exactly like this:
 <think>
-[Your internal reasoning process goes here]
+[خطوات التفكير والتحليل العميق يجب أن تكون باللغة العربية هنا...]
 </think>
-[Your final answer goes here]
+[إجابتك النهائية هنا]
 `;
 
 const NO_THINKING_INSTRUCTION = `
-Answer directly without internal monologue tags.
+IMPORTANT: Do NOT use <think> tags. 
+Do NOT engage in internal monologue or reasoning output. 
+Provide the answer directly and concisely.
 `;
 
 export const streamResponse = async (
@@ -162,13 +170,11 @@ const streamGemini = async (messages: Message[], settings: Settings, onChunk: (c
         };
 
         if (settings.thinkingBudget > 0) {
-            // نستخدم تعليمات تنسيق خفيفة جداً لضمان عمل الواجهة فقط
-            // ولا نتدخل في طريقة تفكير الموديل
-            systemInstructionText = `${FORMAT_ONLY_INSTRUCTION}\n\n${systemInstructionText}`;
+            systemInstructionText = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemInstructionText}`;
             generationConfig.thinkingConfig = { thinkingBudget: settings.thinkingBudget };
         } else {
-            // في حالة عدم التفكير، نطلب منه عدم استخدام الوسوم
-            // systemInstructionText = `${NO_THINKING_INSTRUCTION}\n\n${systemInstructionText}`; // (اختياري، يمكن تركه للوضع الافتراضي)
+            // Explicitly force disable thinking to prevent model defaulting to auto
+            systemInstructionText = `${NO_THINKING_INSTRUCTION}\n\n${systemInstructionText}`;
             generationConfig.thinkingConfig = { thinkingBudget: 0 };
         }
 
@@ -238,27 +244,18 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
             return { role: m.role, content };
         });
 
-        // التعامل الخاص مع DeepSeek R1 وموديلات التفكير الفطرية
-        const isDeepSeekR1 = settings.model.includes('deepseek-r1') || settings.model.includes('thinking');
-        
         let systemContent = settings.customPrompt || "";
-
         if (settings.thinkingBudget > 0) {
-            if (isDeepSeekR1) {
-                // هام جداً: لا نحقن أي تعليمات للموديلات التي تدعم التفكير فطرياً
-                // DeepSeek R1 يقوم بإخراج وسوم <think> تلقائياً
-                // إضافة تعليمات هنا تسبب تكرار الوسوم أو تشويش الموديل
-            } else {
-                systemContent = `${FORMAT_ONLY_INSTRUCTION}\n\n${systemContent}`;
-            }
-        } 
+            systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
+        } else {
+            systemContent = `${NO_THINKING_INSTRUCTION}\n\n${systemContent}`;
+        }
 
         if (systemContent.trim()) {
             formattedMessages.unshift({ role: 'system', content: systemContent });
         }
 
         const extraBody: any = {};
-        // فقط نطلب التفكير من المزود، ولا نتدخل في الـ System Prompt
         if (settings.thinkingBudget > 0 && settings.model.includes('deepseek-r1')) {
             extraBody.include_reasoning = true;
         }
@@ -335,8 +332,10 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
 
         let systemContent = settings.customPrompt || "";
         if (settings.thinkingBudget > 0) {
-            systemContent = `${FORMAT_ONLY_INSTRUCTION}\n\n${systemContent}`;
-        } 
+            systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
+        } else {
+            systemContent = `${NO_THINKING_INSTRUCTION}\n\n${systemContent}`;
+        }
 
         if (systemContent.trim()) {
             formattedMessages.unshift({ role: 'system', content: systemContent });

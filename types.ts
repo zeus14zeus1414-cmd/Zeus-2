@@ -45,12 +45,6 @@ export interface CustomProvider {
     models: { id: string; name: string }[];
 }
 
-export interface MessageCollapsingOptions {
-    enabled: boolean;
-    targets: 'user' | 'assistant' | 'both';
-    thresholdLines: number;
-}
-
 export interface Settings {
     provider: 'gemini' | 'openrouter' | string;
     model: string;
@@ -63,5 +57,9 @@ export interface Settings {
     apiKeyRetryStrategy: 'sequential' | 'round-robin';
     fontSize: number;
     thinkingBudget: number; // ميزانية التفكير
-    messageCollapsing: MessageCollapsingOptions; // خيارات طي الرسائل
+    
+    // إعدادات العرض والطي
+    collapseLongMessages: boolean;
+    collapseTarget: 'user' | 'assistant' | 'both';
+    maxCollapseLines: number;
 }

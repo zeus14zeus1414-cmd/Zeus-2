@@ -10,7 +10,7 @@ interface Props {
 
 const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
     const [localSettings, setLocalSettings] = useState<Settings>(settings);
-    const [activeTab, setActiveTab] = useState<'general' | 'display' | 'keys' | 'custom_providers' | 'custom_models'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'keys' | 'display' | 'custom_providers' | 'custom_models'>('general');
     const [isClosing, setIsClosing] = useState(false);
     
     // حالة للإضافة المتعددة للمفاتيح
@@ -245,8 +245,8 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                 <div className="flex border-b border-zeus-gold/10 px-6 bg-black/40 overflow-x-auto">
                     {[
                         {id: 'general', icon: 'fa-cog', label: 'عام'},
-                        {id: 'display', icon: 'fa-eye', label: 'العرض'}, // تبويب العرض الجديد
                         {id: 'keys', icon: 'fa-key', label: 'المفاتيح'},
+                        {id: 'display', icon: 'fa-eye', label: 'العرض'}, // قسم العرض الجديد
                         {id: 'custom_providers', icon: 'fa-server', label: 'المزودون'},
                         {id: 'custom_models', icon: 'fa-brain', label: 'النماذج'}
                     ].map((tab) => (
@@ -360,9 +360,21 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                         </div>
                     )}
 
+                    {activeTab === 'keys' && (
+                        <div className="space-y-8 animate-fade-in">
+                            {renderKeySection('gemini', 'Gemini', 'fa-google')}
+                            {renderKeySection('openrouter', 'OpenRouter', 'fa-network-wired')}
+                            
+                            {/* عرض المزودين المخصصين أيضاً في قائمة المفاتيح */}
+                            {localSettings.customProviders.map(provider => (
+                                renderKeySection(provider.id, provider.name, 'fa-server')
+                            ))}
+                        </div>
+                    )}
+
+                    {/* تبويب العرض الجديد */}
                     {activeTab === 'display' && (
                         <div className="space-y-8 animate-fade-in">
-                             {/* قسم حجم الخط */}
                             <div className="space-y-2">
                                 <label className="text-sm font-bold text-gray-300 flex justify-between">
                                     <span>حجم الخط</span>
@@ -376,81 +388,62 @@ const SettingsModal: React.FC<Props> = ({ settings, onSave, onClose }) => {
                                 />
                             </div>
 
-                            {/* قسم طي الرسائل */}
-                            <div className="space-y-4 pt-4 border-t border-white/5">
-                                <div className="flex justify-between items-center">
-                                    <label className="text-sm font-bold text-gray-300 flex items-center gap-2">
-                                        <i className="fas fa-compress-alt text-zeus-gold"></i> طي الرسائل الطويلة
-                                    </label>
+                            <div className="border-t border-white/5 pt-6 space-y-6">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <i className="fas fa-compress-alt text-zeus-gold"></i>
+                                        <span className="text-sm font-bold text-white">طي الرسائل الطويلة</span>
+                                        <i className="fas fa-thumbtack text-xs text-zeus-gold/50 rotate-45"></i>
+                                    </div>
                                     <button 
-                                        onClick={() => setLocalSettings({
-                                            ...localSettings, 
-                                            messageCollapsing: { ...localSettings.messageCollapsing, enabled: !localSettings.messageCollapsing.enabled }
-                                        })}
-                                        className={`relative w-11 h-6 rounded-full transition-colors ${localSettings.messageCollapsing.enabled ? 'bg-zeus-gold' : 'bg-gray-700'}`}
+                                        onClick={() => setLocalSettings({...localSettings, collapseLongMessages: !localSettings.collapseLongMessages})}
+                                        className={`w-12 h-6 rounded-full transition-colors relative flex items-center ${localSettings.collapseLongMessages ? 'bg-zeus-gold' : 'bg-gray-700'}`}
                                     >
-                                        <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${localSettings.messageCollapsing.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                                        <div className={`w-4 h-4 rounded-full bg-black shadow-md absolute transition-all duration-300 ${localSettings.collapseLongMessages ? 'translate-x-[2px]' : 'translate-x-[28px]'}`}></div>
                                     </button>
                                 </div>
-                                
-                                {localSettings.messageCollapsing.enabled && (
-                                    <div className="p-4 bg-black/40 border border-white/5 rounded-xl space-y-4 animate-fade-in">
+
+                                <div className={`space-y-6 transition-all duration-300 ${localSettings.collapseLongMessages ? 'opacity-100 max-h-96' : 'opacity-50 max-h-0 overflow-hidden pointer-events-none'}`}>
+                                    <div className="p-4 bg-black/40 border border-white/5 rounded-xl space-y-4">
                                         <div className="space-y-2">
-                                            <label className="text-xs text-gray-400">تطبيق الطي على:</label>
-                                            <div className="flex gap-2">
-                                                {[
-                                                    { value: 'user', label: 'رسائل المستخدم فقط' },
-                                                    { value: 'assistant', label: 'رسائل الذكاء الاصطناعي' },
-                                                    { value: 'both', label: 'الجميع' }
-                                                ].map((opt) => (
-                                                    <button
-                                                        key={opt.value}
-                                                        onClick={() => setLocalSettings({
-                                                            ...localSettings,
-                                                            messageCollapsing: { ...localSettings.messageCollapsing, targets: opt.value as any }
-                                                        })}
-                                                        className={`flex-1 py-2 text-xs rounded-lg border transition-all ${
-                                                            localSettings.messageCollapsing.targets === opt.value 
-                                                                ? 'bg-zeus-gold/20 text-zeus-gold border-zeus-gold/50' 
-                                                                : 'bg-black/20 text-gray-500 border-white/5 hover:bg-white/5'
-                                                        }`}
-                                                    >
-                                                        {opt.label}
-                                                    </button>
-                                                ))}
+                                            <label className="text-xs text-gray-400 font-bold block mb-2">تطبيق الطي على:</label>
+                                            <div className="flex bg-black rounded-lg p-1 border border-white/10">
+                                                <button 
+                                                    onClick={() => setLocalSettings({...localSettings, collapseTarget: 'user'})}
+                                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${localSettings.collapseTarget === 'user' ? 'bg-zeus-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
+                                                >
+                                                    رسائل المستخدم فقط
+                                                </button>
+                                                <button 
+                                                    onClick={() => setLocalSettings({...localSettings, collapseTarget: 'assistant'})}
+                                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${localSettings.collapseTarget === 'assistant' ? 'bg-zeus-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
+                                                >
+                                                    رسائل الذكاء الاصطناعي
+                                                </button>
+                                                <button 
+                                                    onClick={() => setLocalSettings({...localSettings, collapseTarget: 'both'})}
+                                                    className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${localSettings.collapseTarget === 'both' ? 'bg-zeus-gold text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
+                                                >
+                                                    الجميع
+                                                </button>
                                             </div>
                                         </div>
 
                                         <div className="space-y-2">
-                                            <label className="text-xs text-gray-400 flex justify-between">
+                                            <label className="text-xs text-gray-400 font-bold flex justify-between">
                                                 <span>الحد الأقصى للأسطر قبل الطي</span>
-                                                <span className="text-zeus-gold">{localSettings.messageCollapsing.thresholdLines} أسطر</span>
+                                                <span className="text-zeus-gold">{localSettings.maxCollapseLines} أسطر</span>
                                             </label>
                                             <input 
                                                 type="range" min="2" max="20" step="1"
-                                                value={localSettings.messageCollapsing.thresholdLines}
-                                                onChange={(e) => setLocalSettings({
-                                                    ...localSettings,
-                                                    messageCollapsing: { ...localSettings.messageCollapsing, thresholdLines: parseInt(e.target.value) }
-                                                })}
+                                                value={localSettings.maxCollapseLines}
+                                                onChange={(e) => setLocalSettings({...localSettings, maxCollapseLines: parseInt(e.target.value)})}
                                                 className="w-full accent-zeus-gold h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
                                             />
                                         </div>
                                     </div>
-                                )}
+                                </div>
                             </div>
-                        </div>
-                    )}
-
-                    {activeTab === 'keys' && (
-                        <div className="space-y-8 animate-fade-in">
-                            {renderKeySection('gemini', 'Gemini', 'fa-google')}
-                            {renderKeySection('openrouter', 'OpenRouter', 'fa-network-wired')}
-                            
-                            {/* عرض المزودين المخصصين أيضاً في قائمة المفاتيح */}
-                            {localSettings.customProviders.map(provider => (
-                                renderKeySection(provider.id, provider.name, 'fa-server')
-                            ))}
                         </div>
                     )}
 

@@ -18,11 +18,10 @@ const defaultSettings: Settings = {
     apiKeyRetryStrategy: 'sequential',
     fontSize: 18,
     thinkingBudget: 1024,
-    messageCollapsing: {
-        enabled: true,
-        targets: 'user', // الافتراضي: طي رسائل المستخدم فقط
-        thresholdLines: 4
-    }
+    // Default Display Settings
+    collapseLongMessages: true,
+    collapseTarget: 'user', // Default to User only as requested
+    maxCollapseLines: 4
 };
 
 const App: React.FC = () => {
@@ -47,18 +46,7 @@ const App: React.FC = () => {
             const loadedSettings = localStorage.getItem('zeusSettings');
             
             if (loadedChats) setChats(JSON.parse(loadedChats));
-            if (loadedSettings) {
-                const parsed = JSON.parse(loadedSettings);
-                // دمج الإعدادات المحفوظة مع الافتراضية لضمان وجود الحقول الجديدة
-                setSettings({ 
-                    ...defaultSettings, 
-                    ...parsed,
-                    messageCollapsing: {
-                        ...defaultSettings.messageCollapsing,
-                        ...(parsed.messageCollapsing || {})
-                    }
-                });
-            }
+            if (loadedSettings) setSettings({ ...defaultSettings, ...JSON.parse(loadedSettings) });
         } catch (e) {
             console.error("فشل في تحميل البيانات", e);
         }
@@ -373,7 +361,7 @@ const App: React.FC = () => {
                         isStreaming={isStreaming}
                         onNewChat={createNewChat} 
                         onStop={handleStopGeneration} 
-                        collapsingOptions={settings.messageCollapsing} // تمرير خيارات الطي
+                        settings={settings} // Pass settings to ChatWindow
                     />
                 </div>
             </div>
