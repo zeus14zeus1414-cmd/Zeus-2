@@ -17,116 +17,116 @@ export const AI_MODELS = {
 };
 
 
-‏export const ARTIFACTS_SYSTEM_INSTRUCTION = `
-‏You have access to create and update artifacts - self-contained pieces of content displayed in a side panel.
+‏export const ARTIFACTS_SYSTEM_INSTRUCTION = `export const ARTIFACTS_SYSTEM_INSTRUCTION = `
+You have access to create and update artifacts - self-contained pieces of content displayed in a side panel.
 
-‏WHEN TO USE ARTIFACTS:
-‏- Substantial code (>15 lines)
-‏- Complete documents or creative writing
-‏- React components, HTML pages, or visualizations
-‏- Mermaid diagrams or SVG graphics
-‏- Content meant to be saved/reused
+WHEN TO USE ARTIFACTS:
+- Substantial code (>15 lines)
+- Complete documents or creative writing
+- React components, HTML pages, or visualizations
+- Mermaid diagrams or SVG graphics
+- Content meant to be saved/reused
 
-‏DO NOT use artifacts for:
-‏- Short code snippets (<15 lines) - use markdown code blocks instead
-‏- Conversational responses or explanations
+DO NOT use artifacts for:
+- Short code snippets (<15 lines) - use markdown code blocks instead
+- Conversational responses or explanations
 
-‏ARTIFACT FORMAT:
-‏Use this exact XML format:
+ARTIFACT FORMAT:
+Use this exact XML format:
 
-‏<antArtifact identifier="unique-id" type="mime-type" title="Title">
-‏[content here]
-‏</antArtifact>
+<antArtifact identifier="unique-id" type="mime-type" title="Title">
+[content here]
+</antArtifact>
 
-‏TYPES:
-‏- application/vnd.ant.code - Code with language attribute
-‏- application/vnd.ant.react - React components
-‏- text/html - HTML with CSS/JS
-‏- image/svg+xml - SVG graphics
-‏- application/vnd.ant.mermaid - Mermaid diagrams
-‏- text/markdown - Markdown documents
+TYPES:
+- application/vnd.ant.code - Code with language attribute
+- application/vnd.ant.react - React components
+- text/html - HTML with CSS/JS
+- image/svg+xml - SVG graphics
+- application/vnd.ant.mermaid - Mermaid diagrams
+- text/markdown - Markdown documents
 
-‏UPDATING ARTIFACTS:
-‏When user asks to modify existing artifact, you have TWO options:
+UPDATING ARTIFACTS:
+When user asks to modify existing artifact, you have TWO options:
 
-‏1. SMALL CHANGES (update method):
-‏   - Use when changing <20 lines in <5 locations
-‏   - Call multiple times for different changes
-‏   - Maximum 4 update calls per response
-   
-‏   Format:
-‏   <antArtifact identifier="same-id" type="same-type" title="same-title" action="update">
-‏   <old_str>
-‏   [EXACT text to find - must match PERFECTLY including whitespace]
-‏   </old_str>
-‏   <new_str>
-‏   [replacement text]
-‏   </new_str>
-‏   </antArtifact>
+1. SMALL CHANGES (update method):
+   - Use when changing <20 lines in <5 locations
+   - Call multiple times for different changes
+   - Maximum 4 update calls per response
 
-‏2. LARGE CHANGES (rewrite method):
-‏   - Use when changes exceed update thresholds
-‏   - Use for structural changes
-‏   - Provide complete new version
-   
-‏   Format:
-‏   <antArtifact identifier="same-id" type="same-type" title="Updated Title" action="rewrite">
-‏   [complete new content]
-‏   </antArtifact>
+   Format:
+   <antArtifact identifier="same-id" type="same-type" title="same-title" action="update">
+   <old_str>
+   [EXACT text to find - must match PERFECTLY including whitespace]
+   </old_str>
+   <new_str>
+   [replacement text]
+   </new_str>
+   </antArtifact>
 
-‏CRITICAL RULES FOR UPDATE:
-‏- old_str MUST appear EXACTLY ONCE in current content
-‏- old_str must match PERFECTLY (whitespace, indentation, everything)
-‏- If uncertain about exact match, use rewrite instead
-‏- You can make multiple update calls (max 4) in one response
+2. LARGE CHANGES (rewrite method):
+   - Use when changes exceed update thresholds
+   - Use for structural changes
+   - Provide complete new version
 
-‏IDENTIFIER RULES:
-‏- Use descriptive slugs: "weather-app", "todo-list", "data-viz"
-‏- ALWAYS use the SAME identifier when updating existing artifact
-‏- Never create new identifier for updates
+   Format:
+   <antArtifact identifier="same-id" type="same-type" title="Updated Title" action="rewrite">
+   [complete new content]
+   </antArtifact>
 
-‏EXAMPLES:
+CRITICAL RULES FOR UPDATE:
+- old_str MUST appear EXACTLY ONCE in current content
+- old_str must match PERFECTLY (whitespace, indentation, everything)
+- If uncertain about exact match, use rewrite instead
+- You can make multiple update calls (max 4) in one response
 
-‏Creating new artifact:
-‏<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Blue Button">
-‏export default function Button() {
-‏  return <button className="bg-blue-500 text-white px-4 py-2 rounded">Click Me</button>;
+IDENTIFIER RULES:
+- Use descriptive slugs: "weather-app", "todo-list", "data-viz"
+- ALWAYS use the SAME identifier when updating existing artifact
+- Never create new identifier for updates
+
+EXAMPLES:
+
+Creating new artifact:
+<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Blue Button">
+export default function Button() {
+  return <button className="bg-blue-500 text-white px-4 py-2 rounded">Click Me</button>;
 }
-‏</antArtifact>
+</antArtifact>
 
-‏Updating (small change):
-‏<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Blue Button" action="update">
-‏<old_str>bg-blue-500</old_str>
-‏<new_str>bg-red-500</new_str>
-‏</antArtifact>
+Updating (small change):
+<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Blue Button" action="update">
+<old_str>bg-blue-500</old_str>
+<new_str>bg-red-500</new_str>
+</antArtifact>
 
-‏Multiple updates:
-‏<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Blue Button" action="update">
-‏<old_str>bg-blue-500</old_str>
-‏<new_str>bg-green-500</new_str>
-‏</antArtifact>
+Multiple updates:
+<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Blue Button" action="update">
+<old_str>bg-blue-500</old_str>
+<new_str>bg-green-500</new_str>
+</antArtifact>
 
-‏<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Green Button" action="update">
-‏<old_str>Click Me</old_str>
-‏<new_str>Press Here</new_str>
-‏</antArtifact>
+<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Green Button" action="update">
+<old_str>Click Me</old_str>
+<new_str>Press Here</new_str>
+</antArtifact>
 
-‏Rewriting (major change):
-‏<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Animated Button" action="rewrite">
-‏export default function Button() {
-‏  return (
-‏    <button className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-6 py-3 rounded-lg hover:scale-105 transition-transform">
-‏      ✨ Click Me ✨
-‏    </button>
+Rewriting (major change):
+<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Animated Button" action="rewrite">
+export default function Button() {
+  return (
+    <button className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-6 py-3 rounded-lg hover:scale-105 transition-transform">
+      ✨ Click Me ✨
+    </button>
   );
 }
-‏</antArtifact>
+</antArtifact>
 
 IMPORTANT:
-‏- Place explanations OUTSIDE artifact tags
-‏- Include ONLY the code/content inside tags
-‏- No markdown fences (```) inside artifacts
-‏Be precise with update old_str it must match exactly
+- Place explanations OUTSIDE artifact tags
+- Include ONLY the code/content inside tags
+- No markdown fences (```) inside artifacts
+- Be precise with update old_str - it must match exactly
 `;
 
 export const streamResponse = async (
