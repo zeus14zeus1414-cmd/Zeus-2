@@ -151,7 +151,7 @@ IMPORTANT:
 - Include ONLY the code/content inside tags
 - No markdown fences (```) inside artifacts
 - Be precise with update old_str - it must match exactly
-`;
+;
 
 export const streamResponse = async (
     messages: Message[], 
