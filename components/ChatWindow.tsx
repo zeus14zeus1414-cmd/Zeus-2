@@ -306,6 +306,27 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         return marked.parse(thinkContent) as string;
     }, [thinkContent]);
 
+    // --- إضافة منطق الطي الجديد هنا ---
+    const shouldCollapse = useMemo(() => {
+        if (!settings.collapseLongMessages) return false;
+        if (isUser && settings.collapseTarget === 'assistant') return false;
+        if (!isUser && settings.collapseTarget === 'user') return false;
+        if (isLast && isStreaming && !isUser) return false;
+
+        const lines = fullTextAnswer.split('\n').length;
+        return fullTextAnswer.length > MAX_COLLAPSED_LENGTH_CHARS || lines > settings.maxCollapseLines;
+    }, [fullTextAnswer, isLast, isStreaming, isUser, settings]);
+
+    const collapsedHtmlContent = useMemo(() => {
+        if (shouldCollapse && !isExpanded) {
+            const lines = fullTextAnswer.split('\n');
+            const snippet = lines.slice(0, settings.maxCollapseLines).join('\n').slice(0, MAX_COLLAPSED_LENGTH_CHARS);
+            return marked.parse(snippet + '...') as string;
+        }
+        return '';
+    }, [fullTextAnswer, shouldCollapse, isExpanded, settings]);
+    // --------------------------------
+
     const isProcessing = !isUser && isLast && isStreaming;
 
     return (
@@ -405,29 +426,60 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                 )}
 
                 {/* --- رندر الكتل (Blocks) --- */}
-                {showBody && blocks.map((block, idx) => {
-                    if (block.type === 'text') {
-                        return (
-                            <div 
-                                key={idx}
-                                className={`markdown-body leading-relaxed min-w-0 break-words animate-fade-in`}
-                                style={{ fontSize: 'var(--message-font-size)' }}
-                                dangerouslySetInnerHTML={{ __html: marked.parse(block.content) as string }}
-                            />
-                        );
-                    } else if (block.type === 'artifact') {
-                        return (
-                            <ArtifactCard 
-                                key={idx} 
-                                data={block.data} 
-                                onClick={() => onOpenArtifact(block.data)} 
-                                isStreaming={isStreaming && idx === blocks.length - 1} // فقط الأخير يظهر شريط تقدم
-                                isLast={isLast}
-                            />
-                        );
-                    }
-                    return null;
-                })}
+                {/* --- رندر الكتل (Blocks) مع دعم الطي --- */}
+                {showBody && (
+                    shouldCollapse && !isExpanded ? (
+                        // حالة الطي: نعرض فقط النص المختصر بدون أي Artifacts
+                        <div 
+                            className={`markdown-body leading-relaxed min-w-0 break-words mask-bottom animate-fade-in`}
+                            style={{ fontSize: 'var(--message-font-size)' }}
+                            dangerouslySetInnerHTML={{ __html: collapsedHtmlContent }}
+                        />
+                    ) : (
+                        // حالة التوسيع: نعرض الكتل كاملة (نصوص + Artifacts)
+                        blocks.map((block, idx) => {
+                            if (block.type === 'text') {
+                                return (
+                                    <div 
+                                        key={idx}
+                                        className={`markdown-body leading-relaxed min-w-0 break-words animate-fade-in`}
+                                        style={{ fontSize: 'var(--message-font-size)' }}
+                                        dangerouslySetInnerHTML={{ __html: marked.parse(block.content) as string }}
+                                    />
+                                );
+                            } else if (block.type === 'artifact') {
+                                return (
+                                    <ArtifactCard 
+                                        key={idx} 
+                                        data={block.data} 
+                                        onClick={() => onOpenArtifact(block.data)} 
+                                        isStreaming={isStreaming && idx === blocks.length - 1} 
+                                        isLast={isLast}
+                                    />
+                                );
+                            }
+                            return null;
+                        })
+                    )
+                )}
+
+                {/* زر التوسيع/الطي */}
+                {shouldCollapse && (
+                    <button 
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className="w-full mt-2 py-2 text-xs font-bold text-zeus-gold bg-zeus-gold/5 hover:bg-zeus-gold/10 border border-zeus-gold/20 rounded-lg transition-all flex items-center justify-center gap-2"
+                    >
+                        {isExpanded ? (
+                            <>
+                                <i className="fas fa-chevron-up"></i> طي الرسالة
+                            </>
+                        ) : (
+                            <>
+                                <i className="fas fa-chevron-down"></i> إظهار باقي الرسالة ({fullTextAnswer.length.toLocaleString()} حرف)
+                            </>
+                        )}
+                    </button>
+                )}
 
                 {!isUser && isLast && isStreaming && blocks.length > 0 && blocks[blocks.length - 1].type !== 'artifact' && (
                      <span className="zeus-cursor-inline"></span>
