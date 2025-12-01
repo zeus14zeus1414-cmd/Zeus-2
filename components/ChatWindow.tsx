@@ -19,7 +19,7 @@ interface ArtifactData {
     title: string;
     content: string;
     isComplete: boolean;
-    action: 'full' | 'diff'; // خاصية جديدة لتحديد نوع التحديث
+    action: 'full' | 'diff'; // تحديد هل هو ملف كامل أم تعديل
 }
 
 type MessageBlock = 
@@ -45,26 +45,34 @@ const detectLanguage = (type: string, title: string): string => {
     return 'plaintext';
 };
 
-// دالة لتطبيق التعديلات الجزئية (Patching)
+// --- محرك الدمج (The Patch Engine) ---
+// يقوم بدمج التعديلات الجزئية مع النص الأصلي
 const applyPatch = (original: string, patch: string): string => {
-    // 1. البحث عن كتل البحث والاستبدال النمطية
+    // تنسيق البحث والاستبدال:
     // <<<<
-    // OLD CODE
+    // الكود القديم
     // ====
-    // NEW CODE
+    // الكود الجديد
     // >>>>
     if (patch.includes('<<<<') && patch.includes('====') && patch.includes('>>>>')) {
         let result = original;
+        // تقسيم التعديلات وتطبيقها واحدة تلو الأخرى
         const blocks = patch.split('>>>>');
         for (const block of blocks) {
             if (block.includes('<<<<')) {
                 const [_, content] = block.split('<<<<');
                 const parts = content.split('====');
                 if (parts.length === 2) {
-                    const search = parts[0].trim();
-                    const replace = parts[1].trim();
+                    const search = parts[0].trim(); // النص المراد تغييره
+                    const replace = parts[1].trim(); // النص الجديد
+                    
+                    // محاولة استبدال دقيق
                     if (search && result.includes(search)) {
                         result = result.replace(search, replace);
+                    } else {
+                        // في حال فشل التطابق الدقيق (بسبب مسافات مثلاً)، يمكن إضافة منطق تساهل هنا
+                        // حالياً سنبقيها صارمة لضمان الدقة
+                        console.warn("Failed to match patch block:", search);
                     }
                 }
             }
@@ -72,17 +80,14 @@ const applyPatch = (original: string, patch: string): string => {
         return result;
     }
     
-    // 2. إذا لم يكن نمط استبدال، نفترض أنه إلحاق (Append) في حالات الستريمنج البسيط
-    // أو استبدال كامل إذا كان النص يبدو كملف جديد.
-    // للسلامة هنا: إذا كان الـ patch قصيراً جداً، نلحقه، وإلا نستبدله.
-    // ولكن الأفضل في سياق الـ Diff أن نعيد الـ Patch كما هو إذا فشل الدمج ليراه المستخدم
+    // إذا لم يكن باتش، نرجعه كما هو (أو نلحقه في حالات معينة)
     return patch; 
 };
 
 // دالة تحليل النصوص وتقسيمها إلى كتل
 const parseMessageContent = (content: string): MessageBlock[] => {
     const blocks: MessageBlock[] = [];
-    // Regex محدث لدعم خاصية action
+    // Regex محدث لاستخراج خاصية action
     const regex = /(<antArtifact\s+(?:[^>]*?)>[\s\S]*?(?:<\/antArtifact>|$))/g;
     
     const parts = content.split(regex);
@@ -90,7 +95,7 @@ const parseMessageContent = (content: string): MessageBlock[] => {
     parts.forEach(part => {
         if (!part.trim()) return;
 
-        // التحقق مما إذا كان الجزء هو Artifact مع استخراج الخصائص
+        // التحقق مما إذا كان الجزء هو Artifact
         const artifactMatch = part.match(/^<antArtifact\s+identifier="([^"]*)"\s+type="([^"]*)"\s+title="([^"]*)"(?:\s+action="([^"]*)")?>([\s\S]*?)(?:<\/antArtifact>|$)$/);
 
         if (artifactMatch) {
@@ -101,7 +106,7 @@ const parseMessageContent = (content: string): MessageBlock[] => {
                     identifier,
                     type,
                     title,
-                    action: (actionStr as 'diff' | 'full') || 'full', // الافتراضي full
+                    action: (actionStr as 'diff' | 'full') || 'full', // الافتراضي هو ملف كامل
                     content: innerContent, 
                     isComplete: fullMatch.endsWith('</antArtifact>')
                 }
@@ -192,10 +197,13 @@ const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFulls
                             Preview
                         </button>
                     </div>
+                    
                     <div className="w-px h-4 bg-white/10 mx-1"></div>
+
                     <button onClick={onToggleFullscreen} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors hidden md:flex items-center justify-center" title={isFullscreen ? "تصغير" : "تكبير"}>
                         <i className={`fas ${isFullscreen ? 'fa-compress' : 'fa-expand'}`}></i>
                     </button>
+
                     <button onClick={handleCopy} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="نسخ">
                         <i className={`fas ${copyState ? 'fa-check text-green-500' : 'fa-copy'}`}></i>
                     </button>
@@ -245,13 +253,13 @@ const ArtifactCard = ({ data, onClick, isStreaming, isLast }: { data: ArtifactDa
                             {language}
                         </span>
                         {isDiff && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold">
-                                تعديل
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold animate-pulse">
+                                تعديل جزئي
                             </span>
                         )}
                     </div>
                     <p className="text-xs text-gray-500 truncate">
-                        {isDiff ? 'تم تطبيق تحديثات جزئية...' : 'اضغط لعرض المحتوى أو التعديل عليه...'}
+                        {isDiff ? 'جاري تطبيق التعديلات الذكية...' : 'اضغط لعرض المحتوى أو التعديل عليه...'}
                     </p>
                 </div>
                 <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover/card:text-white group-hover/card:bg-zeus-gold/20 transition-all">
@@ -654,7 +662,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                 }
             }
         }
-    }, [chat?.messages, isStreaming]); // إزالة activeArtifact من التبعيات لتجنب الحلقات
+    }, [chat?.messages, isStreaming]); 
 
     // الدالة المسؤولة عن فتح الملف ودمج التحديثات
     const handleOpenArtifact = (data: ArtifactData) => {
