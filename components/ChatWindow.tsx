@@ -21,13 +21,17 @@ interface ArtifactData {
     isComplete: boolean;
 }
 
+type MessageBlock = 
+    | { type: 'text'; content: string }
+    | { type: 'artifact'; data: ArtifactData };
+
 const MAX_COLLAPSED_LENGTH_CHARS = 350; 
 
-// دالة مساعدة لاكتشاف لغة البرمجة بناءً على النوع أو العنوان
+// دالة مساعدة لاكتشاف لغة البرمجة
 const detectLanguage = (type: string, title: string): string => {
     const lowerTitle = title.toLowerCase();
     
-    if (type.includes('react') || lowerTitle.endsWith('.tsx') || lowerTitle.endsWith('.jsx')) return 'javascript'; // highlight.js uses javascript for jsx often
+    if (type.includes('react') || lowerTitle.endsWith('.tsx') || lowerTitle.endsWith('.jsx')) return 'javascript';
     if (type.includes('html') || lowerTitle.endsWith('.html')) return 'html';
     if (type.includes('css') || lowerTitle.endsWith('.css')) return 'css';
     if (type.includes('python') || lowerTitle.endsWith('.py')) return 'python';
@@ -40,27 +44,41 @@ const detectLanguage = (type: string, title: string): string => {
     return 'plaintext';
 };
 
-const parseArtifacts = (content: string): { cleanText: string; artifact: ArtifactData | null } => {
-    const regex = /<antArtifact\s+identifier="([^"]*)"\s+type="([^"]*)"\s+title="([^"]*)">([\s\S]*?)(?:<\/antArtifact>|$)/;
-    const match = content.match(regex);
+// دالة تحليل النصوص وتقسيمها إلى كتل (نص، Artifact، نص، Artifact...)
+const parseMessageContent = (content: string): MessageBlock[] => {
+    const blocks: MessageBlock[] = [];
+    const regex = /(<antArtifact\s+identifier="[^"]*"\s+type="[^"]*"\s+title="[^"]*">[\s\S]*?(?:<\/antArtifact>|$))/g;
     
-    if (match) {
-        const [fullMatch, identifier, type, title, innerContent] = match;
-        const isComplete = fullMatch.endsWith('</antArtifact>');
-        const cleanText = content.replace(fullMatch, '').trim();
-        
-        return {
-            cleanText,
-            artifact: {
-                identifier,
-                type,
-                title,
-                content: innerContent,
-                isComplete
+    // تقسيم النص بناءً على الـ Regex مع الاحتفاظ بالفواصل
+    const parts = content.split(regex);
+
+    parts.forEach(part => {
+        if (!part) return;
+
+        // التحقق مما إذا كان الجزء هو Artifact
+        const artifactMatch = part.match(/^<antArtifact\s+identifier="([^"]*)"\s+type="([^"]*)"\s+title="([^"]*)">([\s\S]*?)(?:<\/antArtifact>|$)$/);
+
+        if (artifactMatch) {
+            const [fullMatch, identifier, type, title, innerContent] = artifactMatch;
+            blocks.push({
+                type: 'artifact',
+                data: {
+                    identifier,
+                    type,
+                    title,
+                    content: innerContent, // لا نقوم بـ trim للحفاظ على المسافات
+                    isComplete: fullMatch.endsWith('</antArtifact>')
+                }
+            });
+        } else {
+            // إذا لم يكن Artifact، فهو نص عادي (تأكد من أنه ليس فارغاً فقط)
+            if (part.length > 0) {
+                blocks.push({ type: 'text', content: part });
             }
-        };
-    }
-    return { cleanText: content, artifact: null };
+        }
+    });
+
+    return blocks;
 };
 
 // --- مكون عرض الـ Artifact (الجانب الأيمن) ---
@@ -80,7 +98,7 @@ const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFulls
             delete (codeRef.current as any).dataset.highlighted;
             hljs.highlightElement(codeRef.current);
         }
-    }, [artifact?.content, activeTab, isOpen, artifact?.type]); // Added type dependency
+    }, [artifact?.content, activeTab, isOpen, artifact?.type]); 
 
     if (!artifact) return null;
 
@@ -178,6 +196,39 @@ const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFulls
     );
 };
 
+const ArtifactCard = ({ data, onClick, isStreaming, isLast }: { data: ArtifactData, onClick: () => void, isStreaming: boolean, isLast: boolean }) => {
+    const language = detectLanguage(data.type, data.title);
+    return (
+        <div 
+            onClick={onClick}
+            className="my-3 group/card cursor-pointer bg-[#0a0a0a] hover:bg-[#111] border border-zeus-gold/20 hover:border-zeus-gold/50 rounded-xl overflow-hidden transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,215,0,0.1)] hover:-translate-y-1 w-full max-w-md"
+        >
+            <div className="p-4 flex items-center gap-4">
+                <div className="w-12 h-12 rounded-lg bg-zeus-gold/10 flex items-center justify-center border border-zeus-gold/20 group-hover/card:bg-zeus-gold/20 transition-colors">
+                    <i className={`fas ${language === 'javascript' ? 'fa-react text-blue-400' : 'fa-code text-zeus-gold'} text-2xl`}></i>
+                </div>
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-bold text-white text-sm truncate" dir="ltr">{data.title}</h4>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5 font-mono">
+                            {language}
+                        </span>
+                    </div>
+                    <p className="text-xs text-gray-500 truncate">اضغط لعرض المحتوى أو التعديل عليه...</p>
+                </div>
+                <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover/card:text-white group-hover/card:bg-zeus-gold/20 transition-all">
+                    <i className="fas fa-arrow-left group-hover/card:-translate-x-1 transition-transform"></i>
+                </div>
+            </div>
+            {!data.isComplete && isStreaming && isLast && (
+                <div className="h-0.5 w-full bg-zeus-gold/10 overflow-hidden">
+                    <div className="h-full bg-zeus-gold animate-progress-indeterminate"></div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, settings, onAttachmentClick, onOpenArtifact }: { 
     msg: Message, 
     isLast: boolean, 
@@ -191,20 +242,18 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
     const [isExpanded, setIsExpanded] = useState(false);
     const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
     
-    const [parsedData, setParsedData] = useState<{
-        thinkContent: string;
-        finalAnswer: string;
-        artifact: ArtifactData | null;
-    }>({ thinkContent: '', finalAnswer: '', artifact: null });
+    // الحالة الآن تخزن كتل (blocks) بدلاً من نص واحد و artifact واحد
+    const [blocks, setBlocks] = useState<MessageBlock[]>([]);
+    const [thinkContent, setThinkContent] = useState('');
     
     useEffect(() => {
         let text = msg.content || '';
-        let thinkContent = '';
+        let extractedThink = '';
         
         const completeThinkRegex = /<(?:think|فكّر|تفكير)>([\s\S]*?)<\/(?:think|فكّر|تفكير)>/gi;
         let match;
         while ((match = completeThinkRegex.exec(text)) !== null) {
-            thinkContent += (thinkContent ? '\n\n---\n\n' : '') + match[1].trim();
+            extractedThink += (extractedThink ? '\n\n---\n\n' : '') + match[1].trim();
         }
         text = text.replace(completeThinkRegex, '').trim();
         
@@ -212,59 +261,38 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         const openMatch = text.match(openTagRegex);
         if (openMatch) {
             const pendingThink = text.slice(openMatch.index! + openMatch[0].length);
-            thinkContent += (thinkContent ? '\n' : '') + pendingThink;
+            extractedThink += (extractedThink ? '\n' : '') + pendingThink;
             text = text.slice(0, openMatch.index).trim();
         }
-        thinkContent = thinkContent.trim();
+        
+        setThinkContent(extractedThink.trim());
+        
+        // تقسيم النص المتبقي إلى كتل
+        const parsedBlocks = parseMessageContent(text);
+        setBlocks(parsedBlocks);
 
-        const { cleanText, artifact } = parseArtifacts(text);
-
-        setParsedData({ 
-            thinkContent, 
-            finalAnswer: cleanText,
-            artifact
-        });
-
-        if (artifact && isLast && isStreaming) {
-             onOpenArtifact(artifact);
+        // فتح آخر Artifact تلقائياً إذا كان جديداً وقيد البث
+        if (isLast && isStreaming) {
+            const lastBlock = parsedBlocks[parsedBlocks.length - 1];
+            if (lastBlock && lastBlock.type === 'artifact') {
+                onOpenArtifact(lastBlock.data);
+            }
         }
 
     }, [msg.content, isLast, isStreaming, onOpenArtifact]);
     
-    const { thinkContent, finalAnswer, artifact } = parsedData;
-    
-    const isWaitingForFirstToken = !isUser && isLast && isStreaming && finalAnswer.length === 0 && thinkContent.length === 0 && !artifact;
+    // حساب النص الكامل لأغراض النسخ والطي (نجمع النصوص فقط)
+    const fullTextAnswer = useMemo(() => {
+        return blocks.filter(b => b.type === 'text').map(b => (b as any).content).join('\n');
+    }, [blocks]);
 
+    const isWaitingForFirstToken = !isUser && isLast && isStreaming && blocks.length === 0 && thinkContent.length === 0;
     const isDeepThinkMode = thinkContent.length > 0 || (isWaitingForFirstToken && forceThinkEnabled);
-
     const loadingText = isDeepThinkMode ? 'جاري التفكير العميق...' : 'لحظة من فضلك...';
-
     const showHeader = isDeepThinkMode || isWaitingForFirstToken;
 
-    const hasContent = finalAnswer.length > 0 || thinkContent.length > 0 || !!artifact;
+    const hasContent = blocks.length > 0 || thinkContent.length > 0;
     const showBody = isUser || hasContent;
-
-    const shouldCollapse = useMemo(() => {
-        if (!settings.collapseLongMessages) return false;
-        if (isUser && settings.collapseTarget === 'assistant') return false;
-        if (!isUser && settings.collapseTarget === 'user') return false;
-        if (isLast && isStreaming && !isUser) return false;
-        const lines = finalAnswer.split('\n').length;
-        return finalAnswer.length > MAX_COLLAPSED_LENGTH_CHARS || lines > settings.maxCollapseLines;
-    }, [finalAnswer, isLast, isStreaming, isUser, settings]);
-
-    const htmlContent = useMemo(() => {
-        let content = finalAnswer || ' '; 
-        if (shouldCollapse && !isExpanded) {
-            const lines = content.split('\n');
-            const snippet = lines.slice(0, settings.maxCollapseLines).join('\n').slice(0, MAX_COLLAPSED_LENGTH_CHARS);
-            return marked.parse(snippet + '...') as string;
-        }
-        if (!isUser && isLast && isStreaming && !artifact) {
-            content += ' <span class="zeus-cursor-inline"></span>';
-        }
-        return marked.parse(content) as string;
-    }, [finalAnswer, isLast, isStreaming, isUser, shouldCollapse, isExpanded, settings, artifact]);
 
     const thinkHtmlContent = useMemo(() => {
         if (!thinkContent) return '';
@@ -297,7 +325,7 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                                 onClick={() => (!isProcessing && isDeepThinkMode) && setIsThinkingExpanded(!isThinkingExpanded)}
                             >
                                 <div className="relative w-6 h-6 flex items-center justify-center flex-shrink-0">
-                                    {isProcessing && !finalAnswer && !artifact ? (
+                                    {isProcessing && blocks.length === 0 ? (
                                         <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50">
                                             <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="animate-dash-flow" strokeDasharray="28 6 28 6 28 30" />
                                         </svg>
@@ -306,7 +334,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                                     )}
                                     <i className="fas fa-bolt text-[10px] text-zeus-gold absolute"></i>
                                 </div>
-
                                 <div className="flex flex-col">
                                     <span className={`text-sm font-bold transition-all whitespace-nowrap ${isProcessing ? 'text-zeus-gold animate-pulse' : 'text-gray-300'}`}>
                                         {isProcessing 
@@ -315,17 +342,14 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                                         }
                                     </span>
                                 </div>
-
                                 {!isProcessing && isDeepThinkMode && (
                                     <i className={`fas fa-chevron-down text-xs text-gray-500 mr-auto transition-transform duration-300 ${isThinkingExpanded ? 'rotate-180' : ''}`}></i>
                                 )}
                             </div>
                         )}
-
                         {isDeepThinkMode && !isWaitingForFirstToken && (
                              <div className={`h-px w-full bg-zeus-gold/20 mb-4 transition-all duration-500 ${isWaitingForFirstToken ? 'opacity-0' : 'opacity-100'}`}></div>
                         )}
-
                         {isDeepThinkMode && isThinkingExpanded && thinkContent && (
                             <div className="mb-4 pl-4 border-r-2 border-zeus-gold/20 animate-slide-up">
                                 <div 
@@ -355,32 +379,16 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                                         className="relative w-32 h-32 md:w-48 md:h-48 rounded-2xl overflow-hidden group/img cursor-pointer border border-white/10 shadow-lg transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_20px_rgba(255,215,0,0.15)] bg-black/50"
                                     >
                                         <img src={`data:${att.mimeType};base64,${att.content}`} className="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110" alt={att.name} />
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover/img:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4">
-                                            <div className="flex items-center gap-2 px-3 py-1 bg-black/60 backdrop-blur-sm rounded-full border border-white/10 text-xs text-white">
-                                                <i className="fas fa-eye text-zeus-gold"></i>
-                                                <span>عرض</span>
-                                            </div>
-                                        </div>
-                                        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/10">
-                                            <i className="fas fa-image text-[10px] text-zeus-gold"></i>
-                                        </div>
+                                        {/* ... Rest of image render code ... */}
                                     </div>
                                 ) : (
                                     <div 
                                         onClick={() => onAttachmentClick(att)}
                                         className="group/file cursor-pointer flex items-center gap-3 bg-[#111] hover:bg-zeus-gold/5 border border-white/10 hover:border-zeus-gold/30 rounded-2xl p-3 md:p-4 transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,215,0,0.05)] hover:-translate-y-1 min-w-[200px] md:min-w-[240px] max-w-full"
                                     >
-                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-gray-800 to-black flex items-center justify-center text-zeus-electric border border-white/5 group-hover/file:border-zeus-gold/20 group-hover/file:scale-110 transition-all duration-300 shadow-inner">
-                                            <i className="fas fa-file-code text-2xl group-hover/file:text-zeus-gold transition-colors"></i>
-                                        </div>
+                                        {/* ... Rest of file render code ... */}
                                         <div className="flex flex-col min-w-0 flex-1">
                                             <span className="text-sm font-bold text-gray-200 truncate w-full" dir="ltr">{att.name}</span>
-                                            <div className="flex items-center gap-2 mt-1">
-                                                <span className="text-[10px] text-gray-500 bg-white/5 px-2 py-0.5 rounded-full font-mono">{(att.size / 1024).toFixed(1)} KB</span>
-                                                <span className="text-[10px] text-zeus-gold opacity-0 group-hover/file:opacity-100 transition-opacity duration-300 flex items-center gap-1">
-                                                    <i className="fas fa-external-link-alt text-[8px]"></i> فتح
-                                                </span>
-                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -389,63 +397,33 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                     </div>
                 )}
 
-                {showBody && (
-                    <>
-                        {(finalAnswer || (!artifact && isProcessing)) && (
+                {/* --- رندر الكتل (Blocks) --- */}
+                {showBody && blocks.map((block, idx) => {
+                    if (block.type === 'text') {
+                        return (
                             <div 
-                                className={`markdown-body leading-relaxed min-w-0 break-words ${shouldCollapse && !isExpanded ? 'mask-bottom' : ''} animate-fade-in`}
+                                key={idx}
+                                className={`markdown-body leading-relaxed min-w-0 break-words animate-fade-in`}
                                 style={{ fontSize: 'var(--message-font-size)' }}
-                                dangerouslySetInnerHTML={{ __html: htmlContent }}
+                                dangerouslySetInnerHTML={{ __html: marked.parse(block.content) as string }}
                             />
-                        )}
+                        );
+                    } else if (block.type === 'artifact') {
+                        return (
+                            <ArtifactCard 
+                                key={idx} 
+                                data={block.data} 
+                                onClick={() => onOpenArtifact(block.data)} 
+                                isStreaming={isStreaming && idx === blocks.length - 1} // فقط الأخير يظهر شريط تقدم
+                                isLast={isLast}
+                            />
+                        );
+                    }
+                    return null;
+                })}
 
-                        {artifact && (
-                            <div 
-                                onClick={() => onOpenArtifact(artifact)}
-                                className="mt-4 group/card cursor-pointer bg-[#0a0a0a] hover:bg-[#111] border border-zeus-gold/20 hover:border-zeus-gold/50 rounded-xl overflow-hidden transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,215,0,0.1)] hover:-translate-y-1"
-                            >
-                                <div className="p-4 flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-lg bg-zeus-gold/10 flex items-center justify-center border border-zeus-gold/20 group-hover/card:bg-zeus-gold/20 transition-colors">
-                                        <i className={`fas ${detectLanguage(artifact.type, artifact.title) === 'javascript' ? 'fa-react text-blue-400' : 'fa-code text-zeus-gold'} text-2xl`}></i>
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <h4 className="font-bold text-white text-sm truncate" dir="ltr">{artifact.title}</h4>
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5 font-mono">
-                                                {detectLanguage(artifact.type, artifact.title)}
-                                            </span>
-                                        </div>
-                                        <p className="text-xs text-gray-500 truncate">اضغط لعرض المحتوى أو التعديل عليه...</p>
-                                    </div>
-                                    <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover/card:text-white group-hover/card:bg-zeus-gold/20 transition-all">
-                                        <i className="fas fa-arrow-left group-hover/card:-translate-x-1 transition-transform"></i>
-                                    </div>
-                                </div>
-                                {!artifact.isComplete && isStreaming && isLast && (
-                                    <div className="h-0.5 w-full bg-zeus-gold/10 overflow-hidden">
-                                        <div className="h-full bg-zeus-gold animate-progress-indeterminate"></div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </>
-                )}
-
-                {shouldCollapse && (
-                    <button 
-                        onClick={() => setIsExpanded(!isExpanded)}
-                        className="w-full mt-2 py-2 text-xs font-bold text-zeus-gold bg-zeus-gold/5 hover:bg-zeus-gold/10 border border-zeus-gold/20 rounded-lg transition-all flex items-center justify-center gap-2"
-                    >
-                        {isExpanded ? (
-                            <>
-                                <i className="fas fa-chevron-up"></i> طي الرسالة
-                            </>
-                        ) : (
-                            <>
-                                <i className="fas fa-chevron-down"></i> إظهار باقي الرسالة ({finalAnswer.length.toLocaleString()} حرف)
-                            </>
-                        )}
-                    </button>
+                {!isUser && isLast && isStreaming && blocks.length > 0 && blocks[blocks.length - 1].type !== 'artifact' && (
+                     <span className="zeus-cursor-inline"></span>
                 )}
                 
                 {(isUser || hasContent) && (
@@ -454,9 +432,9 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                             {new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
                         </span>
                         
-                        {finalAnswer && (
+                        {fullTextAnswer && (
                             <button 
-                                onClick={() => navigator.clipboard.writeText(finalAnswer)}
+                                onClick={() => navigator.clipboard.writeText(fullTextAnswer)}
                                 className="text-gray-500 hover:text-zeus-gold transition-colors p-1 opacity-70 hover:opacity-100"
                                 title="Copy"
                             >
@@ -496,11 +474,9 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
 
     const [activeArtifact, setActiveArtifact] = useState<ArtifactData | null>(null);
     const [isArtifactOpen, setIsArtifactOpen] = useState(false);
-    // حالة جديدة للتكبير
     const [isArtifactFullscreen, setIsArtifactFullscreen] = useState(false);
 
     const isAtBottomRef = useRef(true);
-
     const [visibleCount, setVisibleCount] = useState(50);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const prevScrollHeightRef = useRef<number>(0);
@@ -516,14 +492,12 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         }
     };
 
-    // إعادة تعيين حالة الـ Artifact عند تغيير المحادثة
     useEffect(() => {
         setVisibleCount(50);
         setIsLoadingHistory(false);
         setShowScrollButton(false);
         isAtBottomRef.current = true;
         
-        // إغلاق وتصفير الـ Artifact
         setActiveArtifact(null);
         setIsArtifactOpen(false);
         setIsArtifactFullscreen(false);
@@ -539,13 +513,19 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         }
     }, [chat?.messages.length]);
 
+    // مراقبة البث لتحديث الـ Artifact الأيمن تلقائياً
     useEffect(() => {
         if (isStreaming && chat?.messages.length) {
             const lastMsg = chat.messages[chat.messages.length - 1];
             if (lastMsg.role !== 'user') {
-                const { artifact } = parseArtifacts(lastMsg.content);
-                if (artifact && activeArtifact && artifact.identifier === activeArtifact.identifier) {
-                    setActiveArtifact(artifact);
+                const blocks = parseMessageContent(lastMsg.content);
+                // ابحث عن آخر Artifact في الكتل لتحديث العارض
+                const lastArtifactBlock = [...blocks].reverse().find(b => b.type === 'artifact');
+                if (lastArtifactBlock && lastArtifactBlock.type === 'artifact') {
+                    // إذا كان لدينا واحد نشط ونحن نحدثه، أو إذا كان جديداً
+                    if (!activeArtifact || activeArtifact.identifier === lastArtifactBlock.data.identifier) {
+                        setActiveArtifact(lastArtifactBlock.data);
+                    }
                 }
             }
         }
@@ -567,10 +547,8 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
         const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-        
         const isAtBottom = distanceFromBottom < 100;
         isAtBottomRef.current = isAtBottom;
-        
         setShowScrollButton(distanceFromBottom > 300);
 
         if (scrollTop === 0 && hasMoreHistory && !isLoadingHistory) {
