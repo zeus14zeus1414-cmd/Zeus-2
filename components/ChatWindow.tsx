@@ -19,7 +19,8 @@ interface ArtifactData {
     title: string;
     content: string;
     isComplete: boolean;
-    action: 'full' | 'diff'; // تحديد هل هو ملف كامل أم تعديل
+    action: 'full' | 'diff';
+    version: number; // رقم النسخة لتتبع التعديلات
 }
 
 type MessageBlock = 
@@ -31,7 +32,6 @@ const MAX_COLLAPSED_LENGTH_CHARS = 350;
 // دالة مساعدة لاكتشاف لغة البرمجة
 const detectLanguage = (type: string, title: string): string => {
     const lowerTitle = title.toLowerCase();
-    
     if (type.includes('react') || lowerTitle.endsWith('.tsx') || lowerTitle.endsWith('.jsx')) return 'javascript';
     if (type.includes('html') || lowerTitle.endsWith('.html')) return 'html';
     if (type.includes('css') || lowerTitle.endsWith('.css')) return 'css';
@@ -41,61 +41,47 @@ const detectLanguage = (type: string, title: string): string => {
     if (type.includes('typescript') || lowerTitle.endsWith('.ts')) return 'typescript';
     if (type.includes('sql') || lowerTitle.endsWith('.sql')) return 'sql';
     if (type.includes('xml') || lowerTitle.endsWith('.xml')) return 'xml';
-    
     return 'plaintext';
 };
 
 // --- محرك الدمج (The Patch Engine) ---
-// يقوم بدمج التعديلات الجزئية مع النص الأصلي
 const applyPatch = (original: string, patch: string): string => {
-    // تنسيق البحث والاستبدال:
-    // <<<<
-    // الكود القديم
-    // ====
-    // الكود الجديد
-    // >>>>
+    // التحقق من وجود كتل البحث والاستبدال
     if (patch.includes('<<<<') && patch.includes('====') && patch.includes('>>>>')) {
         let result = original;
-        // تقسيم التعديلات وتطبيقها واحدة تلو الأخرى
         const blocks = patch.split('>>>>');
         for (const block of blocks) {
             if (block.includes('<<<<')) {
                 const [_, content] = block.split('<<<<');
                 const parts = content.split('====');
                 if (parts.length === 2) {
-                    const search = parts[0].trim(); // النص المراد تغييره
-                    const replace = parts[1].trim(); // النص الجديد
-                    
-                    // محاولة استبدال دقيق
+                    const search = parts[0].trim();
+                    const replace = parts[1].trim();
+                    // محاولة الاستبدال (مع تساهل بسيط في المسافات إذا لزم الأمر مستقبلاً)
                     if (search && result.includes(search)) {
                         result = result.replace(search, replace);
-                    } else {
-                        // في حال فشل التطابق الدقيق (بسبب مسافات مثلاً)، يمكن إضافة منطق تساهل هنا
-                        // حالياً سنبقيها صارمة لضمان الدقة
-                        console.warn("Failed to match patch block:", search);
                     }
                 }
             }
         }
         return result;
     }
-    
-    // إذا لم يكن باتش، نرجعه كما هو (أو نلحقه في حالات معينة)
+    // إذا لم يكن باتش نمطي، نعيده كما هو (لأنه قد يكون استبدال كامل أو خطأ)
     return patch; 
 };
 
 // دالة تحليل النصوص وتقسيمها إلى كتل
-const parseMessageContent = (content: string): MessageBlock[] => {
+// هام: هذه الدالة الآن تحتاج "سياق" (Registry) لتعرف محتوى الملف الأصلي عند الدمج
+// لكن بما أنها دالة نقية، سنقوم بالدمج لاحقاً في الـ Components أو نمرر السجل لها.
+// الحل الأفضل: فصل التحليل عن الدمج. التحليل يستخرج ما هو مكتوب، والدمج يحدث عند العرض.
+const parseMessageBlocks = (content: string): MessageBlock[] => {
     const blocks: MessageBlock[] = [];
-    // Regex محدث لاستخراج خاصية action
     const regex = /(<antArtifact\s+(?:[^>]*?)>[\s\S]*?(?:<\/antArtifact>|$))/g;
-    
     const parts = content.split(regex);
 
     parts.forEach(part => {
         if (!part.trim()) return;
 
-        // التحقق مما إذا كان الجزء هو Artifact
         const artifactMatch = part.match(/^<antArtifact\s+identifier="([^"]*)"\s+type="([^"]*)"\s+title="([^"]*)"(?:\s+action="([^"]*)")?>([\s\S]*?)(?:<\/antArtifact>|$)$/);
 
         if (artifactMatch) {
@@ -106,9 +92,10 @@ const parseMessageContent = (content: string): MessageBlock[] => {
                     identifier,
                     type,
                     title,
-                    action: (actionStr as 'diff' | 'full') || 'full', // الافتراضي هو ملف كامل
+                    action: (actionStr as 'diff' | 'full') || 'full',
                     content: innerContent, 
-                    isComplete: fullMatch.endsWith('</antArtifact>')
+                    isComplete: fullMatch.endsWith('</antArtifact>'),
+                    version: 1 // مبدئياً
                 }
             });
         } else {
@@ -121,7 +108,7 @@ const parseMessageContent = (content: string): MessageBlock[] => {
     return blocks;
 };
 
-// --- مكون عرض الـ Artifact ---
+// --- مكون عرض الـ Artifact (النافذة الجانبية) ---
 const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFullscreen }: { 
     artifact: ArtifactData | null, 
     onClose: () => void, 
@@ -178,7 +165,9 @@ const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFulls
                     </div>
                     <div className="flex flex-col overflow-hidden">
                         <h3 className="text-sm font-bold text-white truncate w-full" dir="ltr">{artifact.title}</h3>
-                        <span className="text-[10px] text-gray-500 font-mono truncate">{language}</span>
+                        <span className="text-[10px] text-gray-500 font-mono truncate">
+                            {language} {artifact.version > 1 ? `• v${artifact.version}` : ''}
+                        </span>
                     </div>
                 </div>
 
@@ -197,13 +186,10 @@ const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFulls
                             Preview
                         </button>
                     </div>
-                    
                     <div className="w-px h-4 bg-white/10 mx-1"></div>
-
                     <button onClick={onToggleFullscreen} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors hidden md:flex items-center justify-center" title={isFullscreen ? "تصغير" : "تكبير"}>
                         <i className={`fas ${isFullscreen ? 'fa-compress' : 'fa-expand'}`}></i>
                     </button>
-
                     <button onClick={handleCopy} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="نسخ">
                         <i className={`fas ${copyState ? 'fa-check text-green-500' : 'fa-copy'}`}></i>
                     </button>
@@ -254,12 +240,12 @@ const ArtifactCard = ({ data, onClick, isStreaming, isLast }: { data: ArtifactDa
                         </span>
                         {isDiff && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold animate-pulse">
-                                تعديل جزئي
+                                تحديث (نسخة {data.version})
                             </span>
                         )}
                     </div>
                     <p className="text-xs text-gray-500 truncate">
-                        {isDiff ? 'جاري تطبيق التعديلات الذكية...' : 'اضغط لعرض المحتوى أو التعديل عليه...'}
+                        {isDiff ? 'تم دمج التعديلات وعرض الملف الكامل' : 'اضغط لعرض المحتوى الكامل'}
                     </p>
                 </div>
                 <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover/card:text-white group-hover/card:bg-zeus-gold/20 transition-all">
@@ -275,22 +261,64 @@ const ArtifactCard = ({ data, onClick, isStreaming, isLast }: { data: ArtifactDa
     );
 };
 
-const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, settings, onAttachmentClick, onOpenArtifact }: { 
+// --- مكون الرسالة ---
+// التعديل الرئيسي هنا: تمرير السجل (Registry) للرسالة لكي تدمج المحتوى قبل العرض
+const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, settings, onAttachmentClick, onOpenArtifact, globalRegistry }: { 
     msg: Message, 
     isLast: boolean, 
     isStreaming: boolean, 
     forceThinkEnabled: boolean, 
     settings: Settings,
     onAttachmentClick: (att: Attachment) => void,
-    onOpenArtifact: (data: ArtifactData) => void
+    onOpenArtifact: (data: ArtifactData) => void,
+    globalRegistry: Record<string, string> // السجل العالمي
 }) => {
     const isUser = msg.role === 'user';
     const [isExpanded, setIsExpanded] = useState(false);
     const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
-    
     const [blocks, setBlocks] = useState<MessageBlock[]>([]);
     const [thinkContent, setThinkContent] = useState('');
     
+    // حساب الكتل "المدمجة" (Hydrated Blocks)
+    // هذا هو الحل: بدلاً من عرض الـ diff كما هو، نقوم بدمجه مع ما نعرفه مسبقاً
+    const hydratedBlocks = useMemo(() => {
+        // نصنع نسخة محلية من السجل لتتبع التغييرات داخل الرسالة الواحدة (في حال وجود تحديثات متعددة)
+        let localRegistry = { ...globalRegistry }; 
+        
+        return blocks.map(block => {
+            if (block.type === 'artifact') {
+                const { identifier, action, content } = block.data;
+                let finalContent = content;
+                let version = 1;
+
+                // إذا كان هذا artifact معروف سابقاً في السجل (حتى لو كان من رسالة سابقة)
+                if (localRegistry[identifier]) {
+                    if (action === 'diff') {
+                        finalContent = applyPatch(localRegistry[identifier], content);
+                        version = 2; // يمكن تحسين المنطق لحساب النسخ بدقة أكبر لاحقاً
+                    } else {
+                        // إذا كان full update، فإنه يستبدل القديم
+                        finalContent = content;
+                        version = 1; 
+                    }
+                }
+                
+                // تحديث السجل المحلي للملفات التالية في نفس الرسالة
+                localRegistry[identifier] = finalContent;
+
+                return {
+                    ...block,
+                    data: {
+                        ...block.data,
+                        content: finalContent, // المحتوى الآن هو الملف الكامل
+                        version
+                    }
+                };
+            }
+            return block;
+        });
+    }, [blocks, globalRegistry]);
+
     useEffect(() => {
         let text = msg.content || '';
         let extractedThink = '';
@@ -315,23 +343,30 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         if (msg.role === 'user') {
             setBlocks([{ type: 'text', content: text }]);
         } else {
-            const parsedBlocks = parseMessageContent(text);
+            const parsedBlocks = parseMessageBlocks(text);
             setBlocks(parsedBlocks);
 
-            // إشعار النافذة بوجود artifact جديد (فقط أثناء البث للأحدث)
+            // فتح آخر Artifact تلقائياً مع المحتوى المدمج
             if (isLast && isStreaming) {
                 const lastBlock = parsedBlocks[parsedBlocks.length - 1];
                 if (lastBlock && lastBlock.type === 'artifact') {
-                    onOpenArtifact(lastBlock.data);
+                    // هنا نحتاج إلى النسخة المدمجة لفتحها
+                    // بما أن الـ effect يعمل قبل الـ useMemo أحياناً، نقوم بدمج سريع للتأكد
+                    const original = globalRegistry[lastBlock.data.identifier] || '';
+                    const contentToShow = lastBlock.data.action === 'diff' 
+                        ? applyPatch(original, lastBlock.data.content)
+                        : lastBlock.data.content;
+                        
+                    onOpenArtifact({ ...lastBlock.data, content: contentToShow });
                 }
             }
         }
 
-    }, [msg.content, isLast, isStreaming, onOpenArtifact, msg.role]);
+    }, [msg.content, isLast, isStreaming, onOpenArtifact, msg.role, globalRegistry]); // أضفنا globalRegistry
     
     const fullTextAnswer = useMemo(() => {
-        return blocks.filter(b => b.type === 'text').map(b => (b as any).content).join('\n');
-    }, [blocks]);
+        return hydratedBlocks.filter(b => b.type === 'text').map(b => (b as any).content).join('\n');
+    }, [hydratedBlocks]);
 
     const isWaitingForFirstToken = !isUser && isLast && isStreaming && blocks.length === 0 && thinkContent.length === 0;
     const isDeepThinkMode = thinkContent.length > 0 || (isWaitingForFirstToken && forceThinkEnabled);
@@ -383,95 +418,41 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                 {!isUser && (
                     <>
                         {showHeader && (
-                            <div 
-                                className={`flex items-center gap-3 transition-all duration-300
-                                    ${!isProcessing && isDeepThinkMode ? 'cursor-pointer hover:bg-white/5 rounded-lg -mx-2 px-2 py-1' : ''}
-                                    ${isWaitingForFirstToken ? 'mb-0' : 'mb-3'}
-                                `}
-                                onClick={() => (!isProcessing && isDeepThinkMode) && setIsThinkingExpanded(!isThinkingExpanded)}
-                            >
+                            <div className={`flex items-center gap-3 transition-all duration-300 ${!isProcessing && isDeepThinkMode ? 'cursor-pointer hover:bg-white/5 rounded-lg -mx-2 px-2 py-1' : ''} ${isWaitingForFirstToken ? 'mb-0' : 'mb-3'}`} onClick={() => (!isProcessing && isDeepThinkMode) && setIsThinkingExpanded(!isThinkingExpanded)}>
                                 <div className="relative w-6 h-6 flex items-center justify-center flex-shrink-0">
                                     {isProcessing && blocks.length === 0 ? (
-                                        <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50">
-                                            <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="animate-dash-flow" strokeDasharray="28 6 28 6 28 30" />
-                                        </svg>
+                                        <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="animate-dash-flow" strokeDasharray="28 6 28 6 28 30" /></svg>
                                     ) : (
                                         <div className="w-full h-full rounded-full border-2 border-zeus-gold shadow-[0_0_10px_rgba(255,215,0,0.5)]"></div>
                                     )}
                                     <i className="fas fa-bolt text-[10px] text-zeus-gold absolute"></i>
                                 </div>
                                 <div className="flex flex-col">
-                                    <span className={`text-sm font-bold transition-all whitespace-nowrap ${isProcessing ? 'text-zeus-gold animate-pulse' : 'text-gray-300'}`}>
-                                        {isProcessing 
-                                            ? loadingText
-                                            : (isDeepThinkMode ? 'عرض طريقة التفكير' : '')
-                                        }
-                                    </span>
+                                    <span className={`text-sm font-bold transition-all whitespace-nowrap ${isProcessing ? 'text-zeus-gold animate-pulse' : 'text-gray-300'}`}>{isProcessing ? loadingText : (isDeepThinkMode ? 'عرض طريقة التفكير' : '')}</span>
                                 </div>
-                                {!isProcessing && isDeepThinkMode && (
-                                    <i className={`fas fa-chevron-down text-xs text-gray-500 mr-auto transition-transform duration-300 ${isThinkingExpanded ? 'rotate-180' : ''}`}></i>
-                                )}
+                                {!isProcessing && isDeepThinkMode && (<i className={`fas fa-chevron-down text-xs text-gray-500 mr-auto transition-transform duration-300 ${isThinkingExpanded ? 'rotate-180' : ''}`}></i>)}
                             </div>
                         )}
-                        {isDeepThinkMode && !isWaitingForFirstToken && (
-                             <div className={`h-px w-full bg-zeus-gold/20 mb-4 transition-all duration-500 ${isWaitingForFirstToken ? 'opacity-0' : 'opacity-100'}`}></div>
-                        )}
-                        {isDeepThinkMode && isThinkingExpanded && thinkContent && (
-                            <div className="mb-4 pl-4 border-r-2 border-zeus-gold/20 animate-slide-up">
-                                <div 
-                                    className="markdown-body text-gray-300 leading-relaxed opacity-90"
-                                    style={{ fontSize: '0.9em' }} 
-                                    dangerouslySetInnerHTML={{ __html: thinkHtmlContent }}
-                                />
-                            </div>
-                        )}
+                        {isDeepThinkMode && !isWaitingForFirstToken && (<div className={`h-px w-full bg-zeus-gold/20 mb-4 transition-all duration-500 ${isWaitingForFirstToken ? 'opacity-0' : 'opacity-100'}`}></div>)}
+                        {isDeepThinkMode && isThinkingExpanded && thinkContent && (<div className="mb-4 pl-4 border-r-2 border-zeus-gold/20 animate-slide-up"><div className="markdown-body text-gray-300 leading-relaxed opacity-90" style={{ fontSize: '0.9em' }} dangerouslySetInnerHTML={{ __html: thinkHtmlContent }} /></div>)}
                     </>
                 )}
 
-                {isUser && (
-                    <div className="text-xs mb-3 opacity-70 flex items-center gap-2 border-b border-white/5 pb-2">
-                        <i className="fas fa-user text-blue-400"></i>
-                        <span className="font-bold text-zeus-goldDim">أنت</span>
-                    </div>
-                )}
+                {isUser && (<div className="text-xs mb-3 opacity-70 flex items-center gap-2 border-b border-white/5 pb-2"><i className="fas fa-user text-blue-400"></i><span className="font-bold text-zeus-goldDim">أنت</span></div>)}
 
                 {msg.attachments && msg.attachments.length > 0 && (
                     <div className="flex flex-wrap gap-3 mb-5 justify-end w-full">
                         {msg.attachments.map((att, i) => (
                             <div key={i} className="animate-scale-up" style={{animationDelay: `${i * 100}ms`}}>
                                 {att.dataType === 'image' ? (
-                                    <div 
-                                        onClick={() => onAttachmentClick(att)}
-                                        className="relative w-32 h-32 md:w-48 md:h-48 rounded-2xl overflow-hidden group/img cursor-pointer border border-white/10 shadow-lg transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_20px_rgba(255,215,0,0.15)] bg-black/50"
-                                    >
+                                    <div onClick={() => onAttachmentClick(att)} className="relative w-32 h-32 md:w-48 md:h-48 rounded-2xl overflow-hidden group/img cursor-pointer border border-white/10 shadow-lg transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_20px_rgba(255,215,0,0.15)] bg-black/50">
                                         <img src={`data:${att.mimeType};base64,${att.content}`} className="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110" alt={att.name} />
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover/img:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4">
-                                            <div className="flex items-center gap-2 px-3 py-1 bg-black/60 backdrop-blur-sm rounded-full border border-white/10 text-xs text-white">
-                                                <i className="fas fa-eye text-zeus-gold"></i>
-                                                <span>عرض</span>
-                                            </div>
-                                        </div>
-                                        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/10">
-                                            <i className="fas fa-image text-[10px] text-zeus-gold"></i>
-                                        </div>
+                                        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/10"><i className="fas fa-image text-[10px] text-zeus-gold"></i></div>
                                     </div>
                                 ) : (
-                                    <div 
-                                        onClick={() => onAttachmentClick(att)}
-                                        className="group/file cursor-pointer flex items-center gap-3 bg-[#111] hover:bg-zeus-gold/5 border border-white/10 hover:border-zeus-gold/30 rounded-2xl p-3 md:p-4 transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,215,0,0.05)] hover:-translate-y-1 min-w-[200px] md:min-w-[240px] max-w-full"
-                                    >
-                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-gray-800 to-black flex items-center justify-center text-zeus-electric border border-white/5 group-hover/file:border-zeus-gold/20 group-hover/file:scale-110 transition-all duration-300 shadow-inner">
-                                            <i className="fas fa-file-code text-2xl group-hover/file:text-zeus-gold transition-colors"></i>
-                                        </div>
-                                        <div className="flex flex-col min-w-0 flex-1">
-                                            <span className="text-sm font-bold text-gray-200 truncate w-full" dir="ltr">{att.name}</span>
-                                            <div className="flex items-center gap-2 mt-1">
-                                                <span className="text-[10px] text-gray-500 bg-white/5 px-2 py-0.5 rounded-full font-mono">{(att.size / 1024).toFixed(1)} KB</span>
-                                                <span className="text-[10px] text-zeus-gold opacity-0 group-hover/file:opacity-100 transition-opacity duration-300 flex items-center gap-1">
-                                                    <i className="fas fa-external-link-alt text-[8px]"></i> فتح
-                                                </span>
-                                            </div>
-                                        </div>
+                                    <div onClick={() => onAttachmentClick(att)} className="group/file cursor-pointer flex items-center gap-3 bg-[#111] hover:bg-zeus-gold/5 border border-white/10 hover:border-zeus-gold/30 rounded-2xl p-3 md:p-4 transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,215,0,0.05)] hover:-translate-y-1 min-w-[200px] md:min-w-[240px] max-w-full">
+                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-gray-800 to-black flex items-center justify-center text-zeus-electric border border-white/5 group-hover/file:border-zeus-gold/20 group-hover/file:scale-110 transition-all duration-300 shadow-inner"><i className="fas fa-file-code text-2xl group-hover/file:text-zeus-gold transition-colors"></i></div>
+                                        <div className="flex flex-col min-w-0 flex-1"><span className="text-sm font-bold text-gray-200 truncate w-full" dir="ltr">{att.name}</span></div>
                                     </div>
                                 )}
                             </div>
@@ -481,31 +462,17 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
 
                 {showBody && (
                     shouldCollapse && !isExpanded ? (
-                        <div 
-                            className={`markdown-body leading-relaxed min-w-0 break-words mask-bottom animate-fade-in`}
-                            style={{ fontSize: 'var(--message-font-size)' }}
-                            dangerouslySetInnerHTML={{ __html: collapsedHtmlContent }}
-                        />
+                        <div className={`markdown-body leading-relaxed min-w-0 break-words mask-bottom animate-fade-in`} style={{ fontSize: 'var(--message-font-size)' }} dangerouslySetInnerHTML={{ __html: collapsedHtmlContent }} />
                     ) : (
-                        blocks.map((block, idx) => {
+                        // نستخدم hydratedBlocks بدلاً من blocks لعرض المحتوى المدمج الكامل
+                        hydratedBlocks.map((block, idx) => {
                             if (block.type === 'text') {
                                 return (
-                                    <div 
-                                        key={idx}
-                                        className={`markdown-body leading-relaxed min-w-0 break-words animate-fade-in`}
-                                        style={{ fontSize: 'var(--message-font-size)' }}
-                                        dangerouslySetInnerHTML={{ __html: marked.parse(block.content) as string }}
-                                    />
+                                    <div key={idx} className={`markdown-body leading-relaxed min-w-0 break-words animate-fade-in`} style={{ fontSize: 'var(--message-font-size)' }} dangerouslySetInnerHTML={{ __html: marked.parse(block.content) as string }} />
                                 );
                             } else if (block.type === 'artifact') {
                                 return (
-                                    <ArtifactCard 
-                                        key={idx} 
-                                        data={block.data} 
-                                        onClick={() => onOpenArtifact(block.data)} 
-                                        isStreaming={isStreaming && idx === blocks.length - 1} 
-                                        isLast={isLast}
-                                    />
+                                    <ArtifactCard key={idx} data={block.data} onClick={() => onOpenArtifact(block.data)} isStreaming={isStreaming && idx === blocks.length - 1} isLast={isLast} />
                                 );
                             }
                             return null;
@@ -514,41 +481,17 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                 )}
 
                 {shouldCollapse && (
-                    <button 
-                        onClick={() => setIsExpanded(!isExpanded)}
-                        className="w-full mt-2 py-2 text-xs font-bold text-zeus-gold bg-zeus-gold/5 hover:bg-zeus-gold/10 border border-zeus-gold/20 rounded-lg transition-all flex items-center justify-center gap-2"
-                    >
-                        {isExpanded ? (
-                            <>
-                                <i className="fas fa-chevron-up"></i> طي الرسالة
-                            </>
-                        ) : (
-                            <>
-                                <i className="fas fa-chevron-down"></i> إظهار باقي الرسالة ({fullTextAnswer.length.toLocaleString()} حرف)
-                            </>
-                        )}
+                    <button onClick={() => setIsExpanded(!isExpanded)} className="w-full mt-2 py-2 text-xs font-bold text-zeus-gold bg-zeus-gold/5 hover:bg-zeus-gold/10 border border-zeus-gold/20 rounded-lg transition-all flex items-center justify-center gap-2">
+                        {isExpanded ? (<><i className="fas fa-chevron-up"></i> طي الرسالة</>) : (<><i className="fas fa-chevron-down"></i> إظهار باقي الرسالة ({fullTextAnswer.length.toLocaleString()} حرف)</>)}
                     </button>
                 )}
                 
-                {!isUser && isLast && isStreaming && blocks.length > 0 && blocks[blocks.length - 1].type !== 'artifact' && (
-                     <span className="zeus-cursor-inline"></span>
-                )}
+                {!isUser && isLast && isStreaming && blocks.length > 0 && blocks[blocks.length - 1].type !== 'artifact' && (<span className="zeus-cursor-inline"></span>)}
                 
                 {(isUser || hasContent) && (
                     <div className="mt-2 pt-2 border-t border-white/5 flex justify-between items-center gap-2 select-none">
-                        <span className="text-[9px] md:text-[11px] text-gray-600 font-mono opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity duration-300" dir="ltr">
-                            {new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
-                        </span>
-                        
-                        {fullTextAnswer && (
-                            <button 
-                                onClick={() => navigator.clipboard.writeText(fullTextAnswer)}
-                                className="text-gray-500 hover:text-zeus-gold transition-colors p-1 opacity-70 hover:opacity-100"
-                                title="Copy"
-                            >
-                                <i className="fas fa-copy text-[10px] md:text-xs"></i>
-                            </button>
-                        )}
+                        <span className="text-[9px] md:text-[11px] text-gray-600 font-mono opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity duration-300" dir="ltr">{new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+                        {fullTextAnswer && (<button onClick={() => navigator.clipboard.writeText(fullTextAnswer)} className="text-gray-500 hover:text-zeus-gold transition-colors p-1 opacity-70 hover:opacity-100" title="Copy"><i className="fas fa-copy text-[10px] md:text-xs"></i></button>)}
                     </div>
                 )}
             </div>
@@ -563,7 +506,9 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         prevProps.settings.collapseLongMessages === nextProps.settings.collapseLongMessages &&
         prevProps.settings.collapseTarget === nextProps.settings.collapseTarget &&
         prevProps.settings.maxCollapseLines === nextProps.settings.maxCollapseLines &&
-        prevProps.settings.fontSize === nextProps.settings.fontSize
+        prevProps.settings.fontSize === nextProps.settings.fontSize &&
+        // مقارنة السجل ضرورية لضمان تحديث البطاقات القديمة عند وصول تعديل جديد
+        JSON.stringify(prevProps.globalRegistry) === JSON.stringify(nextProps.globalRegistry) 
     );
 });
 
@@ -584,7 +529,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const [isArtifactOpen, setIsArtifactOpen] = useState(false);
     const [isArtifactFullscreen, setIsArtifactFullscreen] = useState(false);
     
-    // --- السجل لتتبع أحدث نسخة من كل ملف (لدمج الـ Diffs) ---
+    // السجل العالمي للملفات: هذا هو "عقل" التعديلات
     const [artifactRegistry, setArtifactRegistry] = useState<Record<string, string>>({});
 
     const isAtBottomRef = useRef(true);
@@ -614,12 +559,12 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         setIsArtifactOpen(false);
         setIsArtifactFullscreen(false);
         
-        // بناء السجل من تاريخ المحادثة
+        // بناء السجل التراكمي من تاريخ المحادثة
         const newRegistry: Record<string, string> = {};
         if (chat?.messages) {
             chat.messages.forEach(m => {
                 if (m.role !== 'user') {
-                    const blocks = parseMessageContent(m.content);
+                    const blocks = parseMessageBlocks(m.content);
                     blocks.forEach(b => {
                         if (b.type === 'artifact') {
                             const { identifier, content, action } = b.data;
@@ -649,41 +594,47 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         }
     }, [chat?.messages.length]);
 
-    // مراقبة البث لتحديث الـ Artifact الأيمن تلقائياً
+    // مراقبة البث لتحديث السجل والـ Artifact المعروض
     useEffect(() => {
         if (isStreaming && chat?.messages.length) {
             const lastMsg = chat.messages[chat.messages.length - 1];
             if (lastMsg.role !== 'user') {
-                const blocks = parseMessageContent(lastMsg.content);
-                // ابحث عن آخر Artifact في الكتل لتحديث العارض
+                const blocks = parseMessageBlocks(lastMsg.content);
                 const lastArtifactBlock = [...blocks].reverse().find(b => b.type === 'artifact');
+                
                 if (lastArtifactBlock && lastArtifactBlock.type === 'artifact') {
-                    handleOpenArtifact(lastArtifactBlock.data); // نستخدم الدالة الموحدة للتعامل مع الدمج
+                    const { identifier, action, content } = lastArtifactBlock.data;
+                    
+                    // تحديث السجل في الوقت الحقيقي
+                    setArtifactRegistry(prev => {
+                        const original = prev[identifier] || '';
+                        const newContent = action === 'diff' ? applyPatch(original, content) : content;
+                        
+                        // إذا كان هذا الملف مفتوحاً حالياً، نحدث محتواه المعروض
+                        if (activeArtifact && activeArtifact.identifier === identifier) {
+                            setActiveArtifact({ ...lastArtifactBlock.data, content: newContent });
+                        }
+                        
+                        return { ...prev, [identifier]: newContent };
+                    });
                 }
             }
         }
-    }, [chat?.messages, isStreaming]); 
+    }, [chat?.messages, isStreaming, activeArtifact]); // أعدنا activeArtifact للتبعية ليحدث العرض
 
-    // الدالة المسؤولة عن فتح الملف ودمج التحديثات
+    // دالة فتح الـ Artifact من البطاقة (تأخذ المحتوى من السجل دائماً لضمان أنه الأحدث)
     const handleOpenArtifact = (data: ArtifactData) => {
-        let contentToShow = data.content;
+        // نأخذ النسخة الأحدث من السجل، أو نستخدم المحتوى الحالي إذا لم يوجد في السجل بعد (حالة نادرة)
+        const currentContent = artifactRegistry[data.identifier] || data.content;
         
-        // إذا كان تحديث جزئي، ندمجه مع النسخة المخزنة في السجل
-        if (data.action === 'diff') {
-            const original = artifactRegistry[data.identifier] || '';
-            // نطبق الدمج
-            contentToShow = applyPatch(original, data.content);
+        // إذا كان البيانات القادمة هي "تعديل"، نطبقها للتأكد، لكن السجل هو المصدر الأوثق
+        let finalContent = currentContent;
+        if (data.action === 'diff' && !artifactRegistry[data.identifier]) {
+             // حالة احتياطية: إذا لم يكن في السجل، نعتبره ملف جديد مؤقتاً
+             finalContent = data.content;
         }
-        
-        // تحديث السجل والملف المعروض
-        const newData = { ...data, content: contentToShow };
-        
-        setArtifactRegistry(prev => ({
-            ...prev,
-            [data.identifier]: contentToShow
-        }));
-        
-        setActiveArtifact(newData);
+
+        setActiveArtifact({ ...data, content: finalContent });
         setIsArtifactOpen(true);
     };
 
@@ -885,6 +836,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                             settings={settings}
                             onAttachmentClick={setViewingAttachment}
                             onOpenArtifact={handleOpenArtifact}
+                            globalRegistry={artifactRegistry} // تمرير السجل هنا
                         />
                     ))}
                     <div ref={messagesEndRef} />
