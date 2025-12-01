@@ -9,11 +9,10 @@ interface Props {
     onSendMessage: (text: string, files: Attachment[], forceThink: boolean) => void;
     isStreaming: boolean;
     onNewChat: () => void;
-    onStop?: () => void; // إضافة خاصية الإيقاف
-    settings: Settings; // استقبال الإعدادات
+    onStop?: () => void;
+    settings: Settings;
 }
 
-// --- تعريفات Artifacts ---
 interface ArtifactData {
     identifier: string;
     type: string;
@@ -22,9 +21,25 @@ interface ArtifactData {
     isComplete: boolean;
 }
 
-const MAX_COLLAPSED_LENGTH_CHARS = 350; // Fallback value
+const MAX_COLLAPSED_LENGTH_CHARS = 350; 
 
-// دالة تحليل النصوص لاستخراج الـ Artifacts
+// دالة مساعدة لاكتشاف لغة البرمجة بناءً على النوع أو العنوان
+const detectLanguage = (type: string, title: string): string => {
+    const lowerTitle = title.toLowerCase();
+    
+    if (type.includes('react') || lowerTitle.endsWith('.tsx') || lowerTitle.endsWith('.jsx')) return 'javascript'; // highlight.js uses javascript for jsx often
+    if (type.includes('html') || lowerTitle.endsWith('.html')) return 'html';
+    if (type.includes('css') || lowerTitle.endsWith('.css')) return 'css';
+    if (type.includes('python') || lowerTitle.endsWith('.py')) return 'python';
+    if (type.includes('json') || lowerTitle.endsWith('.json')) return 'json';
+    if (type.includes('markdown') || lowerTitle.endsWith('.md')) return 'markdown';
+    if (type.includes('typescript') || lowerTitle.endsWith('.ts')) return 'typescript';
+    if (type.includes('sql') || lowerTitle.endsWith('.sql')) return 'sql';
+    if (type.includes('xml') || lowerTitle.endsWith('.xml')) return 'xml';
+    
+    return 'plaintext';
+};
+
 const parseArtifacts = (content: string): { cleanText: string; artifact: ArtifactData | null } => {
     const regex = /<antArtifact\s+identifier="([^"]*)"\s+type="([^"]*)"\s+title="([^"]*)">([\s\S]*?)(?:<\/antArtifact>|$)/;
     const match = content.match(regex);
@@ -49,7 +64,13 @@ const parseArtifacts = (content: string): { cleanText: string; artifact: Artifac
 };
 
 // --- مكون عرض الـ Artifact (الجانب الأيمن) ---
-const ArtifactViewer = ({ artifact, onClose, isOpen }: { artifact: ArtifactData | null, onClose: () => void, isOpen: boolean }) => {
+const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFullscreen }: { 
+    artifact: ArtifactData | null, 
+    onClose: () => void, 
+    isOpen: boolean,
+    isFullscreen: boolean,
+    onToggleFullscreen: () => void
+}) => {
     const [activeTab, setActiveTab] = useState<'code' | 'preview'>('code');
     const [copyState, setCopyState] = useState(false);
     const codeRef = useRef<HTMLElement>(null);
@@ -59,9 +80,11 @@ const ArtifactViewer = ({ artifact, onClose, isOpen }: { artifact: ArtifactData 
             delete (codeRef.current as any).dataset.highlighted;
             hljs.highlightElement(codeRef.current);
         }
-    }, [artifact?.content, activeTab, isOpen]);
+    }, [artifact?.content, activeTab, isOpen, artifact?.type]); // Added type dependency
 
     if (!artifact) return null;
+
+    const language = detectLanguage(artifact.type, artifact.title);
 
     const handleCopy = () => {
         navigator.clipboard.writeText(artifact.content);
@@ -74,18 +97,17 @@ const ArtifactViewer = ({ artifact, onClose, isOpen }: { artifact: ArtifactData 
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${artifact.title.replace(/\s+/g, '_')}.${artifact.type.includes('react') ? 'tsx' : 'txt'}`;
+        a.download = artifact.title.includes('.') ? artifact.title : `${artifact.title}.${language === 'python' ? 'py' : 'txt'}`;
         a.click();
         URL.revokeObjectURL(url);
     };
 
     return (
         <div className={`
-            fixed inset-0 md:static md:inset-auto z-40 bg-black/95 md:bg-transparent flex flex-col
-            transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]
-            ${isOpen 
-                ? 'translate-x-0 opacity-100 md:w-1/2 md:border-r md:border-zeus-gold/20' 
-                : 'translate-x-full opacity-0 md:w-0 md:border-none md:overflow-hidden pointer-events-none'
+            transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] flex flex-col bg-[#0d0d0d]
+            ${isFullscreen 
+                ? 'fixed inset-0 z-[100] w-full h-full' // Fullscreen mode (Mobile & Desktop)
+                : `fixed inset-0 z-[60] md:static md:z-auto md:inset-auto ${isOpen ? 'translate-x-0 opacity-100 md:w-1/2 md:border-r md:border-zeus-gold/20' : 'translate-x-full opacity-0 md:w-0 md:border-none md:overflow-hidden pointer-events-none'}`
             }
         `}>
             {/* Header */}
@@ -99,7 +121,7 @@ const ArtifactViewer = ({ artifact, onClose, isOpen }: { artifact: ArtifactData 
                     </div>
                     <div className="flex flex-col overflow-hidden">
                         <h3 className="text-sm font-bold text-white truncate w-full" dir="ltr">{artifact.title}</h3>
-                        <span className="text-[10px] text-gray-500 font-mono truncate">{artifact.identifier}</span>
+                        <span className="text-[10px] text-gray-500 font-mono truncate">{language}</span>
                     </div>
                 </div>
 
@@ -121,6 +143,11 @@ const ArtifactViewer = ({ artifact, onClose, isOpen }: { artifact: ArtifactData 
                     
                     <div className="w-px h-4 bg-white/10 mx-1"></div>
 
+                    {/* زر التكبير */}
+                    <button onClick={onToggleFullscreen} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors hidden md:flex items-center justify-center" title={isFullscreen ? "تصغير" : "تكبير"}>
+                        <i className={`fas ${isFullscreen ? 'fa-compress' : 'fa-expand'}`}></i>
+                    </button>
+
                     <button onClick={handleCopy} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="نسخ">
                         <i className={`fas ${copyState ? 'fa-check text-green-500' : 'fa-copy'}`}></i>
                     </button>
@@ -134,10 +161,10 @@ const ArtifactViewer = ({ artifact, onClose, isOpen }: { artifact: ArtifactData 
             </div>
 
             {/* Content Body */}
-            <div className="flex-1 overflow-auto custom-scrollbar bg-[#0d0d0d] relative" dir="ltr">
+            <div className="flex-1 overflow-auto custom-scrollbar relative bg-[#0d0d0d]" dir="ltr">
                 {activeTab === 'code' ? (
                     <pre className="m-0 p-4 md:p-6 text-sm font-mono leading-relaxed">
-                        <code ref={codeRef} className={`language-${artifact.type.includes('react') ? 'javascript' : 'html'} bg-transparent p-0`}>
+                        <code ref={codeRef} className={`language-${language} bg-transparent p-0`}>
                             {artifact.content}
                         </code>
                     </pre>
@@ -151,7 +178,6 @@ const ArtifactViewer = ({ artifact, onClose, isOpen }: { artifact: ArtifactData 
     );
 };
 
-// --- مكون الرسالة المعدل ---
 const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, settings, onAttachmentClick, onOpenArtifact }: { 
     msg: Message, 
     isLast: boolean, 
@@ -165,19 +191,16 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
     const [isExpanded, setIsExpanded] = useState(false);
     const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
     
-    // حالة لتخزين البيانات المحللة (النص النظيف، التفكير، والـ Artifact)
     const [parsedData, setParsedData] = useState<{
         thinkContent: string;
         finalAnswer: string;
         artifact: ArtifactData | null;
     }>({ thinkContent: '', finalAnswer: '', artifact: null });
     
-    // استخدام useEffect بدلاً من useMemo للتعامل مع التحديثات الجانبية (Side Effects) مثل فتح النافذة تلقائياً
     useEffect(() => {
         let text = msg.content || '';
         let thinkContent = '';
         
-        // 1. استخراج التفكير (Think Blocks)
         const completeThinkRegex = /<(?:think|فكّر|تفكير)>([\s\S]*?)<\/(?:think|فكّر|تفكير)>/gi;
         let match;
         while ((match = completeThinkRegex.exec(text)) !== null) {
@@ -185,7 +208,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         }
         text = text.replace(completeThinkRegex, '').trim();
         
-        // معالجة التفكير غير المكتمل
         const openTagRegex = /<(?:think|فكّر|تفكير)>/i;
         const openMatch = text.match(openTagRegex);
         if (openMatch) {
@@ -195,7 +217,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         }
         thinkContent = thinkContent.trim();
 
-        // 2. استخراج الـ Artifacts من النص المتبقي
         const { cleanText, artifact } = parseArtifacts(text);
 
         setParsedData({ 
@@ -204,7 +225,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
             artifact
         });
 
-        // إذا وجدنا Artifact جديد وهو آخر رسالة، نفتح اللوحة تلقائياً
         if (artifact && isLast && isStreaming) {
              onOpenArtifact(artifact);
         }
@@ -240,7 +260,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
             const snippet = lines.slice(0, settings.maxCollapseLines).join('\n').slice(0, MAX_COLLAPSED_LENGTH_CHARS);
             return marked.parse(snippet + '...') as string;
         }
-        // لا نظهر المؤشر إذا كنا نعرض Artifact
         if (!isUser && isLast && isStreaming && !artifact) {
             content += ' <span class="zeus-cursor-inline"></span>';
         }
@@ -370,7 +389,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                     </div>
                 )}
 
-                {/* عرض المحتوى أو البطاقة */}
                 {showBody && (
                     <>
                         {(finalAnswer || (!artifact && isProcessing)) && (
@@ -381,7 +399,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                             />
                         )}
 
-                        {/* Artifact Card - بطاقة الملف المولد */}
                         {artifact && (
                             <div 
                                 onClick={() => onOpenArtifact(artifact)}
@@ -389,13 +406,13 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                             >
                                 <div className="p-4 flex items-center gap-4">
                                     <div className="w-12 h-12 rounded-lg bg-zeus-gold/10 flex items-center justify-center border border-zeus-gold/20 group-hover/card:bg-zeus-gold/20 transition-colors">
-                                        <i className={`fas ${artifact.type.includes('react') ? 'fa-react text-blue-400' : 'fa-code text-zeus-gold'} text-2xl`}></i>
+                                        <i className={`fas ${detectLanguage(artifact.type, artifact.title) === 'javascript' ? 'fa-react text-blue-400' : 'fa-code text-zeus-gold'} text-2xl`}></i>
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1">
                                             <h4 className="font-bold text-white text-sm truncate" dir="ltr">{artifact.title}</h4>
                                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5 font-mono">
-                                                {artifact.type.split('.').pop()}
+                                                {detectLanguage(artifact.type, artifact.title)}
                                             </span>
                                         </div>
                                         <p className="text-xs text-gray-500 truncate">اضغط لعرض المحتوى أو التعديل عليه...</p>
@@ -404,7 +421,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                                         <i className="fas fa-arrow-left group-hover/card:-translate-x-1 transition-transform"></i>
                                     </div>
                                 </div>
-                                {/* شريط التقدم الوهمي أثناء التوليد */}
                                 {!artifact.isComplete && isStreaming && isLast && (
                                     <div className="h-0.5 w-full bg-zeus-gold/10 overflow-hidden">
                                         <div className="h-full bg-zeus-gold animate-progress-indeterminate"></div>
@@ -465,7 +481,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
     );
 });
 
-// --- المكون الرئيسي ChatWindow ---
 const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewChat, onStop, settings }) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -477,14 +492,13 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [showScrollButton, setShowScrollButton] = useState(false);
     
-    // State for viewing attachments
     const [viewingAttachment, setViewingAttachment] = useState<Attachment | null>(null);
 
-    // --- الجديد: حالة الـ Artifacts ---
     const [activeArtifact, setActiveArtifact] = useState<ArtifactData | null>(null);
     const [isArtifactOpen, setIsArtifactOpen] = useState(false);
+    // حالة جديدة للتكبير
+    const [isArtifactFullscreen, setIsArtifactFullscreen] = useState(false);
 
-    // مرجع للتحقق مما إذا كان المستخدم في أسفل الصفحة
     const isAtBottomRef = useRef(true);
 
     const [visibleCount, setVisibleCount] = useState(50);
@@ -502,11 +516,18 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         }
     };
 
+    // إعادة تعيين حالة الـ Artifact عند تغيير المحادثة
     useEffect(() => {
         setVisibleCount(50);
         setIsLoadingHistory(false);
         setShowScrollButton(false);
         isAtBottomRef.current = true;
+        
+        // إغلاق وتصفير الـ Artifact
+        setActiveArtifact(null);
+        setIsArtifactOpen(false);
+        setIsArtifactFullscreen(false);
+
         setTimeout(() => {
             scrollToBottom('instant');
         }, 50); 
@@ -518,13 +539,11 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         }
     }, [chat?.messages.length]);
 
-    // التوليد التلقائي للـ Artifact عند البث
     useEffect(() => {
         if (isStreaming && chat?.messages.length) {
             const lastMsg = chat.messages[chat.messages.length - 1];
             if (lastMsg.role !== 'user') {
                 const { artifact } = parseArtifacts(lastMsg.content);
-                // إذا كان هناك Artifact نشط ويتم تحديثه، نقوم بتحديث حالته
                 if (artifact && activeArtifact && artifact.identifier === activeArtifact.identifier) {
                     setActiveArtifact(artifact);
                 }
@@ -710,8 +729,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     return (
         <div className="flex-1 flex overflow-hidden md:mx-4 md:mb-4 glass-gold md:rounded-2xl border-0 md:border border-zeus-gold/20 shadow-none md:shadow-2xl relative">
             
-            {/* --- تعديل الجانب الأيسر: منطقة الدردشة --- */}
-            <div className={`flex flex-col h-full transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${isArtifactOpen ? 'w-full md:w-1/2' : 'w-full'}`}>
+            <div className={`flex flex-col h-full transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${isArtifactOpen && !isArtifactFullscreen ? 'w-full md:w-1/2' : 'w-full'}`}>
                 
                 <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 md:space-y-8 custom-scrollbar">
                     {isLoadingHistory && (
@@ -818,10 +836,11 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                 </div>
             </div>
 
-            {/* --- الجديد: الجانب الأيمن (عارض الـ Artifact) --- */}
             <ArtifactViewer 
                 artifact={activeArtifact} 
                 isOpen={isArtifactOpen} 
+                isFullscreen={isArtifactFullscreen}
+                onToggleFullscreen={() => setIsArtifactFullscreen(!isArtifactFullscreen)}
                 onClose={() => setIsArtifactOpen(false)} 
             />
 
