@@ -39,7 +39,7 @@ Provide the answer directly and concisely.
 `;
 
 // ========================================
-// تعليمات Artifacts المحسّنة (مثل Claude تماماً)
+// تعليمات Artifactsالمحسّنة (مثل Claude تماماً)
 // ========================================
 export const ARTIFACTS_SYSTEM_INSTRUCTION = `
 You have access to create and update artifacts - self-contained pieces of content displayed in a side panel.
