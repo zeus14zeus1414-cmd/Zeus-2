@@ -66,6 +66,18 @@ RULES FOR GENERATING ARTIFACTS:
    - For React/Tailwind: type="application/vnd.ant.react"
    - For HTML: type="text/html"
    - For Diagrams: type="application/vnd.ant.mermaid"
+   - For Python: type="application/x-python"
+
+5. WHEN TO USE (CRITICAL):
+   - USE Artifacts for: 
+     * Substantial code files (e.g., > 15 lines).
+     * Complete applications or components.
+     * When the user explicitly asks for a file, code, or "artifact".
+   - DO NOT USE Artifacts for:
+     * Short code snippets (1-10 lines).
+     * Explanatory examples.
+     * Command line commands.
+     * INSTEAD, use standard markdown code blocks (\`\`\`) for these small items.
 
 EXAMPLE:
 User: "Make a button"
