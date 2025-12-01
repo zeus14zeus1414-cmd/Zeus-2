@@ -19,6 +19,7 @@ interface ArtifactData {
     title: string;
     content: string;
     isComplete: boolean;
+    action: 'full' | 'diff'; // خاصية جديدة لتحديد نوع التحديث
 }
 
 type MessageBlock = 
@@ -44,34 +45,68 @@ const detectLanguage = (type: string, title: string): string => {
     return 'plaintext';
 };
 
-// دالة تحليل النصوص وتقسيمها إلى كتل (نص، Artifact، نص، Artifact...)
+// دالة لتطبيق التعديلات الجزئية (Patching)
+const applyPatch = (original: string, patch: string): string => {
+    // 1. البحث عن كتل البحث والاستبدال النمطية
+    // <<<<
+    // OLD CODE
+    // ====
+    // NEW CODE
+    // >>>>
+    if (patch.includes('<<<<') && patch.includes('====') && patch.includes('>>>>')) {
+        let result = original;
+        const blocks = patch.split('>>>>');
+        for (const block of blocks) {
+            if (block.includes('<<<<')) {
+                const [_, content] = block.split('<<<<');
+                const parts = content.split('====');
+                if (parts.length === 2) {
+                    const search = parts[0].trim();
+                    const replace = parts[1].trim();
+                    if (search && result.includes(search)) {
+                        result = result.replace(search, replace);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+    
+    // 2. إذا لم يكن نمط استبدال، نفترض أنه إلحاق (Append) في حالات الستريمنج البسيط
+    // أو استبدال كامل إذا كان النص يبدو كملف جديد.
+    // للسلامة هنا: إذا كان الـ patch قصيراً جداً، نلحقه، وإلا نستبدله.
+    // ولكن الأفضل في سياق الـ Diff أن نعيد الـ Patch كما هو إذا فشل الدمج ليراه المستخدم
+    return patch; 
+};
+
+// دالة تحليل النصوص وتقسيمها إلى كتل
 const parseMessageContent = (content: string): MessageBlock[] => {
     const blocks: MessageBlock[] = [];
-    const regex = /(<antArtifact\s+identifier="[^"]*"\s+type="[^"]*"\s+title="[^"]*">[\s\S]*?(?:<\/antArtifact>|$))/g;
+    // Regex محدث لدعم خاصية action
+    const regex = /(<antArtifact\s+(?:[^>]*?)>[\s\S]*?(?:<\/antArtifact>|$))/g;
     
-    // تقسيم النص بناءً على الـ Regex مع الاحتفاظ بالفواصل
     const parts = content.split(regex);
 
     parts.forEach(part => {
-        if (!part) return;
+        if (!part.trim()) return;
 
-        // التحقق مما إذا كان الجزء هو Artifact
-        const artifactMatch = part.match(/^<antArtifact\s+identifier="([^"]*)"\s+type="([^"]*)"\s+title="([^"]*)">([\s\S]*?)(?:<\/antArtifact>|$)$/);
+        // التحقق مما إذا كان الجزء هو Artifact مع استخراج الخصائص
+        const artifactMatch = part.match(/^<antArtifact\s+identifier="([^"]*)"\s+type="([^"]*)"\s+title="([^"]*)"(?:\s+action="([^"]*)")?>([\s\S]*?)(?:<\/antArtifact>|$)$/);
 
         if (artifactMatch) {
-            const [fullMatch, identifier, type, title, innerContent] = artifactMatch;
+            const [fullMatch, identifier, type, title, actionStr, innerContent] = artifactMatch;
             blocks.push({
                 type: 'artifact',
                 data: {
                     identifier,
                     type,
                     title,
-                    content: innerContent, // لا نقوم بـ trim للحفاظ على المسافات
+                    action: (actionStr as 'diff' | 'full') || 'full', // الافتراضي full
+                    content: innerContent, 
                     isComplete: fullMatch.endsWith('</antArtifact>')
                 }
             });
         } else {
-            // إذا لم يكن Artifact، فهو نص عادي (تأكد من أنه ليس فارغاً فقط)
             if (part.length > 0) {
                 blocks.push({ type: 'text', content: part });
             }
@@ -81,7 +116,7 @@ const parseMessageContent = (content: string): MessageBlock[] => {
     return blocks;
 };
 
-// --- مكون عرض الـ Artifact (الجانب الأيمن) ---
+// --- مكون عرض الـ Artifact ---
 const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFullscreen }: { 
     artifact: ArtifactData | null, 
     onClose: () => void, 
@@ -124,11 +159,10 @@ const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFulls
         <div className={`
             transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] flex flex-col bg-[#0d0d0d]
             ${isFullscreen 
-                ? 'fixed inset-0 z-[100] w-full h-full' // Fullscreen mode (Mobile & Desktop)
+                ? 'fixed inset-0 z-[100] w-full h-full' 
                 : `fixed inset-0 z-[60] md:static md:z-auto md:inset-auto ${isOpen ? 'translate-x-0 opacity-100 md:w-1/2 md:border-r md:border-zeus-gold/20' : 'translate-x-full opacity-0 md:w-0 md:border-none md:overflow-hidden pointer-events-none'}`
             }
         `}>
-            {/* Header */}
             <div className="h-14 flex items-center justify-between px-4 border-b border-zeus-gold/20 bg-zeus-surface shrink-0">
                 <div className="flex items-center gap-3 overflow-hidden">
                     <button onClick={onClose} className="md:hidden text-gray-400 hover:text-white">
@@ -158,14 +192,10 @@ const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFulls
                             Preview
                         </button>
                     </div>
-                    
                     <div className="w-px h-4 bg-white/10 mx-1"></div>
-
-                    {/* زر التكبير */}
                     <button onClick={onToggleFullscreen} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors hidden md:flex items-center justify-center" title={isFullscreen ? "تصغير" : "تكبير"}>
                         <i className={`fas ${isFullscreen ? 'fa-compress' : 'fa-expand'}`}></i>
                     </button>
-
                     <button onClick={handleCopy} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="نسخ">
                         <i className={`fas ${copyState ? 'fa-check text-green-500' : 'fa-copy'}`}></i>
                     </button>
@@ -178,7 +208,6 @@ const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFulls
                 </div>
             </div>
 
-            {/* Content Body */}
             <div className="flex-1 overflow-auto custom-scrollbar relative bg-[#0d0d0d]" dir="ltr">
                 {activeTab === 'code' ? (
                     <pre className="m-0 p-4 md:p-6 text-sm font-mono leading-relaxed">
@@ -198,6 +227,8 @@ const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFulls
 
 const ArtifactCard = ({ data, onClick, isStreaming, isLast }: { data: ArtifactData, onClick: () => void, isStreaming: boolean, isLast: boolean }) => {
     const language = detectLanguage(data.type, data.title);
+    const isDiff = data.action === 'diff';
+    
     return (
         <div 
             onClick={onClick}
@@ -213,8 +244,15 @@ const ArtifactCard = ({ data, onClick, isStreaming, isLast }: { data: ArtifactDa
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5 font-mono">
                             {language}
                         </span>
+                        {isDiff && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold">
+                                تعديل
+                            </span>
+                        )}
                     </div>
-                    <p className="text-xs text-gray-500 truncate">اضغط لعرض المحتوى أو التعديل عليه...</p>
+                    <p className="text-xs text-gray-500 truncate">
+                        {isDiff ? 'تم تطبيق تحديثات جزئية...' : 'اضغط لعرض المحتوى أو التعديل عليه...'}
+                    </p>
                 </div>
                 <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover/card:text-white group-hover/card:bg-zeus-gold/20 transition-all">
                     <i className="fas fa-arrow-left group-hover/card:-translate-x-1 transition-transform"></i>
@@ -242,7 +280,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
     const [isExpanded, setIsExpanded] = useState(false);
     const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
     
-    // الحالة الآن تخزن كتل (blocks) بدلاً من نص واحد و artifact واحد
     const [blocks, setBlocks] = useState<MessageBlock[]>([]);
     const [thinkContent, setThinkContent] = useState('');
     
@@ -250,7 +287,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         let text = msg.content || '';
         let extractedThink = '';
         
-        // استخراج التفكير (نحتفظ به للنموذج فقط غالباً، لكن لا يضر بقاؤه هنا للتنظيف)
         const completeThinkRegex = /<(?:think|فكّر|تفكير)>([\s\S]*?)<\/(?:think|فكّر|تفكير)>/gi;
         let match;
         while ((match = completeThinkRegex.exec(text)) !== null) {
@@ -268,16 +304,13 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         
         setThinkContent(extractedThink.trim());
         
-        // --- التعديل هنا: شرط لمنع تحليل Artifacts للمستخدم ---
         if (msg.role === 'user') {
-            // للمستخدم: نعتبر النص كتلة نصية واحدة فقط ولا نبحث عن artifacts
             setBlocks([{ type: 'text', content: text }]);
         } else {
-            // للموديل: نقوم بالتحليل وتقسيم الكتل
             const parsedBlocks = parseMessageContent(text);
             setBlocks(parsedBlocks);
 
-            // فتح آخر Artifact تلقائياً إذا كان جديداً وقيد البث (فقط للموديل)
+            // إشعار النافذة بوجود artifact جديد (فقط أثناء البث للأحدث)
             if (isLast && isStreaming) {
                 const lastBlock = parsedBlocks[parsedBlocks.length - 1];
                 if (lastBlock && lastBlock.type === 'artifact') {
@@ -286,9 +319,8 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
             }
         }
 
-    }, [msg.content, isLast, isStreaming, onOpenArtifact, msg.role]); // تمت إضافة msg.role للمصفوفة
+    }, [msg.content, isLast, isStreaming, onOpenArtifact, msg.role]);
     
-    // حساب النص الكامل لأغراض النسخ والطي (نجمع النصوص فقط)
     const fullTextAnswer = useMemo(() => {
         return blocks.filter(b => b.type === 'text').map(b => (b as any).content).join('\n');
     }, [blocks]);
@@ -306,7 +338,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         return marked.parse(thinkContent) as string;
     }, [thinkContent]);
 
-    // --- إضافة منطق الطي الجديد هنا ---
     const shouldCollapse = useMemo(() => {
         if (!settings.collapseLongMessages) return false;
         if (isUser && settings.collapseTarget === 'assistant') return false;
@@ -325,7 +356,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         }
         return '';
     }, [fullTextAnswer, shouldCollapse, isExpanded, settings]);
-    // --------------------------------
 
     const isProcessing = !isUser && isLast && isStreaming;
 
@@ -407,16 +437,32 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                                         className="relative w-32 h-32 md:w-48 md:h-48 rounded-2xl overflow-hidden group/img cursor-pointer border border-white/10 shadow-lg transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_20px_rgba(255,215,0,0.15)] bg-black/50"
                                     >
                                         <img src={`data:${att.mimeType};base64,${att.content}`} className="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110" alt={att.name} />
-                                        {/* ... Rest of image render code ... */}
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover/img:opacity-100 transition-opacity duration-300 flex items-end justify-center pb-4">
+                                            <div className="flex items-center gap-2 px-3 py-1 bg-black/60 backdrop-blur-sm rounded-full border border-white/10 text-xs text-white">
+                                                <i className="fas fa-eye text-zeus-gold"></i>
+                                                <span>عرض</span>
+                                            </div>
+                                        </div>
+                                        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/10">
+                                            <i className="fas fa-image text-[10px] text-zeus-gold"></i>
+                                        </div>
                                     </div>
                                 ) : (
                                     <div 
                                         onClick={() => onAttachmentClick(att)}
                                         className="group/file cursor-pointer flex items-center gap-3 bg-[#111] hover:bg-zeus-gold/5 border border-white/10 hover:border-zeus-gold/30 rounded-2xl p-3 md:p-4 transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,215,0,0.05)] hover:-translate-y-1 min-w-[200px] md:min-w-[240px] max-w-full"
                                     >
-                                        {/* ... Rest of file render code ... */}
+                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-gray-800 to-black flex items-center justify-center text-zeus-electric border border-white/5 group-hover/file:border-zeus-gold/20 group-hover/file:scale-110 transition-all duration-300 shadow-inner">
+                                            <i className="fas fa-file-code text-2xl group-hover/file:text-zeus-gold transition-colors"></i>
+                                        </div>
                                         <div className="flex flex-col min-w-0 flex-1">
                                             <span className="text-sm font-bold text-gray-200 truncate w-full" dir="ltr">{att.name}</span>
+                                            <div className="flex items-center gap-2 mt-1">
+                                                <span className="text-[10px] text-gray-500 bg-white/5 px-2 py-0.5 rounded-full font-mono">{(att.size / 1024).toFixed(1)} KB</span>
+                                                <span className="text-[10px] text-zeus-gold opacity-0 group-hover/file:opacity-100 transition-opacity duration-300 flex items-center gap-1">
+                                                    <i className="fas fa-external-link-alt text-[8px]"></i> فتح
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -425,18 +471,14 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                     </div>
                 )}
 
-                {/* --- رندر الكتل (Blocks) --- */}
-                {/* --- رندر الكتل (Blocks) مع دعم الطي --- */}
                 {showBody && (
                     shouldCollapse && !isExpanded ? (
-                        // حالة الطي: نعرض فقط النص المختصر بدون أي Artifacts
                         <div 
                             className={`markdown-body leading-relaxed min-w-0 break-words mask-bottom animate-fade-in`}
                             style={{ fontSize: 'var(--message-font-size)' }}
                             dangerouslySetInnerHTML={{ __html: collapsedHtmlContent }}
                         />
                     ) : (
-                        // حالة التوسيع: نعرض الكتل كاملة (نصوص + Artifacts)
                         blocks.map((block, idx) => {
                             if (block.type === 'text') {
                                 return (
@@ -463,7 +505,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                     )
                 )}
 
-                {/* زر التوسيع/الطي */}
                 {shouldCollapse && (
                     <button 
                         onClick={() => setIsExpanded(!isExpanded)}
@@ -480,7 +521,7 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                         )}
                     </button>
                 )}
-
+                
                 {!isUser && isLast && isStreaming && blocks.length > 0 && blocks[blocks.length - 1].type !== 'artifact' && (
                      <span className="zeus-cursor-inline"></span>
                 )}
@@ -534,6 +575,9 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const [activeArtifact, setActiveArtifact] = useState<ArtifactData | null>(null);
     const [isArtifactOpen, setIsArtifactOpen] = useState(false);
     const [isArtifactFullscreen, setIsArtifactFullscreen] = useState(false);
+    
+    // --- السجل لتتبع أحدث نسخة من كل ملف (لدمج الـ Diffs) ---
+    const [artifactRegistry, setArtifactRegistry] = useState<Record<string, string>>({});
 
     const isAtBottomRef = useRef(true);
     const [visibleCount, setVisibleCount] = useState(50);
@@ -551,6 +595,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         }
     };
 
+    // إعادة بناء سجل الملفات عند تحميل المحادثة
     useEffect(() => {
         setVisibleCount(50);
         setIsLoadingHistory(false);
@@ -560,6 +605,30 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         setActiveArtifact(null);
         setIsArtifactOpen(false);
         setIsArtifactFullscreen(false);
+        
+        // بناء السجل من تاريخ المحادثة
+        const newRegistry: Record<string, string> = {};
+        if (chat?.messages) {
+            chat.messages.forEach(m => {
+                if (m.role !== 'user') {
+                    const blocks = parseMessageContent(m.content);
+                    blocks.forEach(b => {
+                        if (b.type === 'artifact') {
+                            const { identifier, content, action } = b.data;
+                            if (action === 'diff') {
+                                // تطبيق الدمج على النسخة السابقة
+                                const original = newRegistry[identifier] || '';
+                                newRegistry[identifier] = applyPatch(original, content);
+                            } else {
+                                // استبدال كامل
+                                newRegistry[identifier] = content;
+                            }
+                        }
+                    });
+                }
+            });
+        }
+        setArtifactRegistry(newRegistry);
 
         setTimeout(() => {
             scrollToBottom('instant');
@@ -581,17 +650,32 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                 // ابحث عن آخر Artifact في الكتل لتحديث العارض
                 const lastArtifactBlock = [...blocks].reverse().find(b => b.type === 'artifact');
                 if (lastArtifactBlock && lastArtifactBlock.type === 'artifact') {
-                    // إذا كان لدينا واحد نشط ونحن نحدثه، أو إذا كان جديداً
-                    if (!activeArtifact || activeArtifact.identifier === lastArtifactBlock.data.identifier) {
-                        setActiveArtifact(lastArtifactBlock.data);
-                    }
+                    handleOpenArtifact(lastArtifactBlock.data); // نستخدم الدالة الموحدة للتعامل مع الدمج
                 }
             }
         }
-    }, [chat?.messages, isStreaming, activeArtifact]);
+    }, [chat?.messages, isStreaming]); // إزالة activeArtifact من التبعيات لتجنب الحلقات
 
-    const handleOpenArtifact = (artifact: ArtifactData) => {
-        setActiveArtifact(artifact);
+    // الدالة المسؤولة عن فتح الملف ودمج التحديثات
+    const handleOpenArtifact = (data: ArtifactData) => {
+        let contentToShow = data.content;
+        
+        // إذا كان تحديث جزئي، ندمجه مع النسخة المخزنة في السجل
+        if (data.action === 'diff') {
+            const original = artifactRegistry[data.identifier] || '';
+            // نطبق الدمج
+            contentToShow = applyPatch(original, data.content);
+        }
+        
+        // تحديث السجل والملف المعروض
+        const newData = { ...data, content: contentToShow };
+        
+        setArtifactRegistry(prev => ({
+            ...prev,
+            [data.identifier]: contentToShow
+        }));
+        
+        setActiveArtifact(newData);
         setIsArtifactOpen(true);
     };
 
