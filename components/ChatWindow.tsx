@@ -250,6 +250,7 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         let text = msg.content || '';
         let extractedThink = '';
         
+        // استخراج التفكير (نحتفظ به للنموذج فقط غالباً، لكن لا يضر بقاؤه هنا للتنظيف)
         const completeThinkRegex = /<(?:think|فكّر|تفكير)>([\s\S]*?)<\/(?:think|فكّر|تفكير)>/gi;
         let match;
         while ((match = completeThinkRegex.exec(text)) !== null) {
@@ -267,19 +268,25 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         
         setThinkContent(extractedThink.trim());
         
-        // تقسيم النص المتبقي إلى كتل
-        const parsedBlocks = parseMessageContent(text);
-        setBlocks(parsedBlocks);
+        // --- التعديل هنا: شرط لمنع تحليل Artifacts للمستخدم ---
+        if (msg.role === 'user') {
+            // للمستخدم: نعتبر النص كتلة نصية واحدة فقط ولا نبحث عن artifacts
+            setBlocks([{ type: 'text', content: text }]);
+        } else {
+            // للموديل: نقوم بالتحليل وتقسيم الكتل
+            const parsedBlocks = parseMessageContent(text);
+            setBlocks(parsedBlocks);
 
-        // فتح آخر Artifact تلقائياً إذا كان جديداً وقيد البث
-        if (isLast && isStreaming) {
-            const lastBlock = parsedBlocks[parsedBlocks.length - 1];
-            if (lastBlock && lastBlock.type === 'artifact') {
-                onOpenArtifact(lastBlock.data);
+            // فتح آخر Artifact تلقائياً إذا كان جديداً وقيد البث (فقط للموديل)
+            if (isLast && isStreaming) {
+                const lastBlock = parsedBlocks[parsedBlocks.length - 1];
+                if (lastBlock && lastBlock.type === 'artifact') {
+                    onOpenArtifact(lastBlock.data);
+                }
             }
         }
 
-    }, [msg.content, isLast, isStreaming, onOpenArtifact]);
+    }, [msg.content, isLast, isStreaming, onOpenArtifact, msg.role]); // تمت إضافة msg.role للمصفوفة
     
     // حساب النص الكامل لأغراض النسخ والطي (نجمع النصوص فقط)
     const fullTextAnswer = useMemo(() => {
