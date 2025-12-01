@@ -70,11 +70,11 @@ RULES FOR GENERATING ARTIFACTS:
 
 5. WHEN TO USE (CRITICAL):
    - USE Artifacts for: 
-     * Substantial code files (e.g., > 15 lines).
+     * Substantial code files (e.g., > 200 lines).
      * Complete applications or components.
      * When the user explicitly asks for a file, code, or "artifact".
    - DO NOT USE Artifacts for:
-     * Short code snippets (1-10 lines).
+     * Short code snippets (1-200 lines).
      * Explanatory examples.
      * Command line commands.
      * INSTEAD, use standard markdown code blocks (\`\`\`) for these small items.
