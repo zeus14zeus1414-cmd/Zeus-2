@@ -38,6 +38,46 @@ Do NOT engage in internal monologue or reasoning output.
 Provide the answer directly and concisely.
 `;
 
+export const ARTIFACTS_SYSTEM_INSTRUCTION = `
+CUSTOM INSTRUCTIONS FOR ARTIFACTS:
+
+You have access to a special UI capability called "Artifacts".
+Use Artifacts to generate self-contained, substantial content like:
+- Code (HTML, CSS, JS, React Components)
+- SVG Images
+- Mermaid Diagrams
+- Complete Documents
+
+RULES FOR GENERATING ARTIFACTS:
+1. WRAPPING: You MUST wrap the content strictly inside XML tags:
+   <antArtifact identifier="<unique-slug>" type="<mime-type>" title="<title>">
+     ... content goes here ...
+   </antArtifact>
+
+2. IDENTIFIER (CRITICAL): 
+   - Use a unique identifier (e.g., "weather-app-v1"). 
+   - IF YOU ARE MODIFYING an existing file, YOU MUST USE THE SAME IDENTIFIER. This tells the UI to update the existing view instead of creating a new one.
+
+3. CONTENT:
+   - Inside the tags, provide ONLY the raw code/content. NO markdown code blocks (\`\`\`), NO explanations, NO chatter.
+   - Explanations go OUTSIDE the artifact tags (in your conversational response).
+
+4. TYPES:
+   - For React/Tailwind: type="application/vnd.ant.react"
+   - For HTML: type="text/html"
+   - For Diagrams: type="application/vnd.ant.mermaid"
+
+EXAMPLE:
+User: "Make a button"
+You:
+Here is the button component:
+<antArtifact identifier="blue-button" type="application/vnd.ant.react" title="Blue Button">
+import React from 'react';
+export default function Button() { return <button className="bg-blue-500">Click</button>; }
+</antArtifact>
+I used Tailwind for styling.
+`;
+
 export const streamResponse = async (
     messages: Message[], 
     settings: Settings, 
@@ -143,90 +183,116 @@ const streamGemini = async (messages: Message[], settings: Settings, onChunk: (c
     const activeKeys = settings.geminiApiKeys.filter(k => k.status === 'active');
     
     return streamWithKeyRotation(activeKeys, 'Gemini', async (apiKey) => {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:streamGenerateContent?key=${apiKey}&alt=sse`;
+        let currentMessages = [...messages];
+        let fullResponse = '';
+        let loopCount = 0;
+        const MAX_LOOPS = 5; 
+        let shouldContinue = true;
 
-        const contents = messages.map(msg => {
-            if (msg.role === 'user') {
-                const parts: any[] = [];
-                if (msg.attachments) {
-                    msg.attachments.forEach(att => {
-                        if (att.dataType === 'image') {
-                            parts.push({ inline_data: { mime_type: att.mimeType, data: att.content } });
-                        } else {
-                            parts.push({ text: `\n\n--- محتوى الملف: ${att.name} ---\n${att.content}\n--- نهاية الملف ---\n` });
-                        }
-                    });
+        while (shouldContinue && loopCount < MAX_LOOPS) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:streamGenerateContent?key=${apiKey}&alt=sse`;
+
+            const contents = currentMessages.map(msg => {
+                if (msg.role === 'user') {
+                    const parts: any[] = [];
+                    if (msg.attachments) {
+                        msg.attachments.forEach(att => {
+                            if (att.dataType === 'image') {
+                                parts.push({ inline_data: { mime_type: att.mimeType, data: att.content } });
+                            } else {
+                                parts.push({ text: `\n\n--- محتوى الملف: ${att.name} ---\n${att.content}\n--- نهاية الملف ---\n` });
+                            }
+                        });
+                    }
+                    parts.push({ text: msg.content || " " }); 
+                    return { role: 'user', parts };
                 }
-                parts.push({ text: msg.content || " " }); 
-                return { role: 'user', parts };
+                return { role: 'model', parts: [{ text: msg.content }] };
+            });
+
+            let systemInstructionText = settings.customPrompt || "";
+            // دمج تعليمات Artifacts مع تعليمات التفكير
+            systemInstructionText = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${systemInstructionText}`;
+
+            const generationConfig: any = {
+                temperature: settings.temperature,
+                maxOutputTokens: 8192
+            };
+
+            if (settings.thinkingBudget > 0) {
+                systemInstructionText = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemInstructionText}`;
+                generationConfig.thinkingConfig = { thinkingBudget: settings.thinkingBudget };
+            } else {
+                systemInstructionText = `${NO_THINKING_INSTRUCTION}\n\n${systemInstructionText}`;
+                generationConfig.thinkingConfig = { thinkingBudget: 0 };
             }
-            return { role: 'model', parts: [{ text: msg.content }] };
-        });
 
-        let systemInstructionText = settings.customPrompt || "";
-        const generationConfig: any = {
-            temperature: settings.temperature,
-            maxOutputTokens: 8192
-        };
+            const requestBody: any = { contents, generationConfig };
 
-        if (settings.thinkingBudget > 0) {
-            systemInstructionText = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemInstructionText}`;
-            generationConfig.thinkingConfig = { thinkingBudget: settings.thinkingBudget };
-        } else {
-            // Explicitly force disable thinking to prevent model defaulting to auto
-            systemInstructionText = `${NO_THINKING_INSTRUCTION}\n\n${systemInstructionText}`;
-            generationConfig.thinkingConfig = { thinkingBudget: 0 };
-        }
+            if (systemInstructionText.trim()) {
+                requestBody.systemInstruction = { parts: [{ text: systemInstructionText }] };
+            }
 
-        const requestBody: any = { contents, generationConfig };
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody),
+                signal // تمرير إشارة الإيقاف
+            });
 
-        if (systemInstructionText.trim()) {
-            requestBody.systemInstruction = { parts: [{ text: systemInstructionText }] };
-        }
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Gemini Error: ${response.status} - ${errText}`);
+            }
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody),
-            signal // تمرير إشارة الإيقاف
-        });
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let currentLoopResponse = '';
+            let finishReason = '';
 
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Gemini Error: ${response.status} - ${errText}`);
-        }
+            if (!reader) throw new Error("No response body");
 
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let fullText = '';
-        let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value, { stream: true });
+                buffer += chunk;
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (trimmedLine.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(trimmedLine.slice(6));
+                            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                            const reason = data.candidates?.[0]?.finishReason;
+                            
+                            if (reason) finishReason = reason;
 
-        if (!reader) throw new Error("No response body");
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            buffer += chunk;
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-            
-            for (const line of lines) {
-                const trimmedLine = line.trim();
-                if (trimmedLine.startsWith('data: ')) {
-                    try {
-                        const data = JSON.parse(trimmedLine.slice(6));
-                        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                        if (text) {
-                            fullText += text;
-                            onChunk(text);
-                        }
-                    } catch (e) { }
+                            if (text) {
+                                fullResponse += text;
+                                currentLoopResponse += text;
+                                onChunk(text);
+                            }
+                        } catch (e) { }
+                    }
                 }
             }
+
+            // التحقق مما إذا كان يجب الاستمرار (Auto-Continue)
+            if (finishReason === 'MAX_TOKENS' || finishReason === 'LENGTH') {
+                console.log('Gemini hit max tokens, auto-continuing...');
+                currentMessages.push({ role: 'assistant', content: currentLoopResponse, id: Date.now().toString(), timestamp: Date.now() });
+                loopCount++;
+            } else {
+                shouldContinue = false;
+            }
         }
-        return fullText;
+        
+        return fullResponse;
     });
 };
 
@@ -234,7 +300,8 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
     const activeKeys = settings.openrouterApiKeys.filter(k => k.status === 'active');
 
     return streamWithKeyRotation(activeKeys, 'OpenRouter', async (apiKey) => {
-        const formattedMessages = messages.map(m => {
+        let currentMessages = [...messages];
+        const formattedMessages = currentMessages.map(m => {
             let content = m.content;
             if(m.attachments?.length) {
                 m.attachments.forEach(att => {
@@ -245,6 +312,9 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
         });
 
         let systemContent = settings.customPrompt || "";
+        // دمج تعليمات Artifacts
+        systemContent = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
+
         if (settings.thinkingBudget > 0) {
             systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
         } else {
@@ -255,64 +325,88 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
             formattedMessages.unshift({ role: 'system', content: systemContent });
         }
 
-        const extraBody: any = {};
-        if (settings.thinkingBudget > 0 && settings.model.includes('deepseek-r1')) {
-            extraBody.include_reasoning = true;
-        }
+        let fullResponse = '';
+        let loopCount = 0;
+        const MAX_LOOPS = 5;
+        let shouldContinue = true;
 
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-                'HTTP-Referer': window.location.origin,
-                'X-Title': 'Zeus Chat'
-            },
-            body: JSON.stringify({
-                model: settings.model,
-                messages: formattedMessages,
-                temperature: settings.temperature,
-                stream: true,
-                ...extraBody
-            }),
-            signal // تمرير إشارة الإيقاف
-        });
+        while(shouldContinue && loopCount < MAX_LOOPS) {
+            const extraBody: any = {};
+            if (settings.thinkingBudget > 0 && settings.model.includes('deepseek-r1')) {
+                extraBody.include_reasoning = true;
+            }
 
-        if (!response.ok) throw new Error(`OpenRouter Error: ${response.status}`);
+            const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                    'HTTP-Referer': window.location.origin,
+                    'X-Title': 'Zeus Chat'
+                },
+                body: JSON.stringify({
+                    model: settings.model,
+                    messages: formattedMessages,
+                    temperature: settings.temperature,
+                    stream: true,
+                    ...extraBody
+                }),
+                signal // تمرير إشارة الإيقاف
+            });
 
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let fullText = '';
-        let buffer = '';
+            if (!response.ok) throw new Error(`OpenRouter Error: ${response.status}`);
 
-        if(!reader) throw new Error("No body");
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let currentLoopResponse = '';
+            let finishReason = '';
 
-        while(true) {
-            const {done, value} = await reader.read();
-            if(done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            buffer += chunk;
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-            
-            for(const line of lines) {
-                const trimmedLine = line.trim();
-                if(trimmedLine.startsWith('data: ')) {
-                    const dataStr = trimmedLine.slice(6);
-                    if(dataStr === '[DONE]') break;
-                    try {
-                        const data = JSON.parse(dataStr);
-                        const content = data.choices[0]?.delta?.content || data.choices[0]?.delta?.reasoning || '';
-                        if(content) {
-                            fullText += content;
-                            onChunk(content);
-                        }
-                    } catch(e) {}
+            if(!reader) throw new Error("No body");
+
+            while(true) {
+                const {done, value} = await reader.read();
+                if(done) break;
+                
+                const chunk = decoder.decode(value, { stream: true });
+                buffer += chunk;
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                
+                for(const line of lines) {
+                    const trimmedLine = line.trim();
+                    if(trimmedLine.startsWith('data: ')) {
+                        const dataStr = trimmedLine.slice(6);
+                        if(dataStr === '[DONE]') break;
+                        try {
+                            const data = JSON.parse(dataStr);
+                            const content = data.choices[0]?.delta?.content || data.choices[0]?.delta?.reasoning || '';
+                            const reason = data.choices[0]?.finish_reason;
+                            
+                            if (reason) finishReason = reason;
+
+                            if(content) {
+                                fullResponse += content;
+                                currentLoopResponse += content;
+                                onChunk(content);
+                            }
+                        } catch(e) {}
+                    }
                 }
             }
+
+             // منطق المتابعة لـ OpenRouter
+             if (finishReason === 'length') {
+                console.log('OpenRouter hit length limit, auto-continuing...');
+                formattedMessages.push({ role: 'assistant', content: currentLoopResponse });
+                formattedMessages.push({ role: 'user', content: 'Continue exactly from where you stopped.' });
+                loopCount++;
+            } else {
+                shouldContinue = false;
+            }
         }
-        return fullText;
+
+        return fullResponse;
     });
 };
 
@@ -331,6 +425,9 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
         });
 
         let systemContent = settings.customPrompt || "";
+        // دمج تعليمات Artifacts
+        systemContent = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
+
         if (settings.thinkingBudget > 0) {
             systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
         } else {
@@ -353,14 +450,13 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
                 model: settings.model,
                 messages: formattedMessages,
                 temperature: settings.temperature,
-                stream: true // تفعيل الستريمنج الحقيقي
+                stream: true 
             }),
             signal // تمرير إشارة الإيقاف
         });
 
         if (!response.ok) throw new Error(`Custom Provider Error: ${response.status}`);
 
-        // استخدام الـ Reader لقراءة التدفق الحقيقي
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         let fullText = '';
@@ -379,23 +475,19 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
             
             for (const line of lines) {
                 const trimmedLine = line.trim();
-                // معالجة صيغة SSE القياسية (data: {...})
                 if (trimmedLine.startsWith('data: ')) {
                     const dataStr = trimmedLine.slice(6);
                     if (dataStr === '[DONE]') break;
                     
                     try {
                         const data = JSON.parse(dataStr);
-                        // دعم معظم المزودين المتوافقين مع OpenAI
                         const content = data.choices?.[0]?.delta?.content || data.choices?.[0]?.text || '';
                         
                         if (content) {
                             fullText += content;
                             onChunk(content);
                         }
-                    } catch (e) {
-                        // تجاهل أخطاء البارسنج للسطور غير المكتملة
-                    }
+                    } catch (e) {}
                 }
             }
         }
