@@ -122,12 +122,11 @@ export const AI_MODELS = {
 }
 ‏</antArtifact>
 
-‏IMPORTANT:
+IMPORTANT:
 ‏- Place explanations OUTSIDE artifact tags
 ‏- Include ONLY the code/content inside tags
 ‏- No markdown fences (```) inside artifacts
 ‏Be precise with update old_str it must match exactly
-
 `;
 
 export const streamResponse = async (
