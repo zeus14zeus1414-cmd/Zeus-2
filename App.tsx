@@ -4,7 +4,7 @@ import { streamResponse, generateChatTitle } from './services/ai';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import SettingsModal from './components/SettingsModal';
-import { DeleteModal, RenameModal } from './components/ActionModals';
+import { DeleteModal, RenameModal, DuplicateModal } from './components/ActionModals';
 
 const defaultSettings: Settings = {
     provider: 'gemini',
@@ -36,7 +36,7 @@ const App: React.FC = () => {
     const abortControllerRef = useRef<AbortController | null>(null);
 
     // Modal States
-    const [activeModal, setActiveModal] = useState<'delete' | 'rename' | null>(null);
+    const [activeModal, setActiveModal] = useState<'delete' | 'rename' | 'duplicate' | null>(null);
     const [modalTargetId, setModalTargetId] = useState<string | null>(null);
     const [modalTargetTitle, setModalTargetTitle] = useState<string>('');
     
@@ -113,6 +113,57 @@ const App: React.FC = () => {
             }));
             setActiveModal(null);
             setModalTargetId(null);
+        }
+    };
+
+    const requestDuplicateChat = (id: string) => {
+        setModalTargetId(id);
+        setActiveModal('duplicate');
+    };
+
+    const confirmDuplicateChat = () => {
+        if (modalTargetId && chats[modalTargetId]) {
+            const originalChat = chats[modalTargetId];
+            const newId = Date.now().toString();
+            
+            // Logic to determine new title (Name 2, Name 3, etc.)
+            let baseTitle = originalChat.title;
+            // Check if title already ends with a number
+            const match = baseTitle.match(/^(.*?)(\d+)$/);
+            let namePart = baseTitle;
+            let numberPart = 2;
+
+            if (match) {
+                namePart = match[1].trim();
+                numberPart = parseInt(match[2]) + 1;
+            }
+
+            let newTitle = `${namePart} ${numberPart}`;
+            
+            // Ensure uniqueness loop
+            while (Object.values(chats).some((c: Chat) => c.title === newTitle)) {
+                numberPart++;
+                newTitle = `${namePart} ${numberPart}`;
+            }
+
+            // Create Deep Copy
+            const newChat: Chat = {
+                ...originalChat,
+                id: newId,
+                title: newTitle,
+                // Deep copy messages to ensure independence
+                messages: JSON.parse(JSON.stringify(originalChat.messages)),
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                order: Date.now() // Moves to top
+            };
+
+            setChats(prev => ({ ...prev, [newId]: newChat }));
+            setActiveModal(null);
+            setModalTargetId(null);
+            
+            // Optional: Switch to the new chat immediately
+            // setCurrentChatId(newId);
         }
     };
 
@@ -316,6 +367,7 @@ const App: React.FC = () => {
                         onNewChat={createNewChat}
                         onRequestDelete={requestDeleteChat}
                         onRequestRename={requestRenameChat}
+                        onRequestDuplicate={requestDuplicateChat}
                         onClose={() => setIsSidebarOpen(false)}
                         onReorder={handleReorder}
                     />
@@ -386,6 +438,13 @@ const App: React.FC = () => {
                 initialTitle={modalTargetTitle}
                 onClose={() => setActiveModal(null)}
                 onRename={confirmRenameChat}
+            />
+            
+            <DuplicateModal
+                isOpen={activeModal === 'duplicate'}
+                chatTitle={modalTargetId ? chats[modalTargetId]?.title : ''}
+                onClose={() => setActiveModal(null)}
+                onConfirm={confirmDuplicateChat}
             />
         </div>
     );

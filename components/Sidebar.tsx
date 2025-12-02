@@ -9,12 +9,13 @@ interface Props {
     // Updated props signature
     onRequestDelete: (id: string) => void;
     onRequestRename: (id: string, currentTitle: string) => void;
+    onRequestDuplicate: (id: string) => void;
     onClose: () => void;
     onReorder: (newOrder: Chat[]) => void; 
 }
 
 const Sidebar: React.FC<Props> = ({ 
-    chats, currentChatId, onSelectChat, onNewChat, onRequestDelete, onRequestRename, onClose, onReorder 
+    chats, currentChatId, onSelectChat, onNewChat, onRequestDelete, onRequestRename, onRequestDuplicate, onClose, onReorder 
 }) => {
     const [draggedItem, setDraggedItem] = useState<Chat | null>(null);
     const dragOverItem = useRef<Chat | null>(null);
@@ -97,6 +98,17 @@ const Sidebar: React.FC<Props> = ({
                                 flex items-center gap-2 mt-3 pt-2 border-t border-white/5 justify-end
                                 ${chat.id === currentChatId ? 'flex' : 'hidden group-hover:flex'}
                             `}>
+                                <button 
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        onRequestDuplicate(chat.id);
+                                    }}
+                                    className="w-8 h-8 rounded-lg bg-black/40 hover:bg-cyan-500/20 hover:text-cyan-400 text-gray-400 transition-colors flex items-center justify-center"
+                                    title="نسخ المحادثة"
+                                >
+                                    <i className="fas fa-clone text-xs"></i>
+                                </button>
                                 <button 
                                     onClick={(e) => {
                                         e.preventDefault();

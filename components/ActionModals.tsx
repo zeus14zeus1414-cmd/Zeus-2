@@ -14,6 +14,13 @@ interface RenameModalProps {
     onRename: (newTitle: string) => void;
 }
 
+interface DuplicateModalProps {
+    isOpen: boolean;
+    chatTitle: string;
+    onClose: () => void;
+    onConfirm: () => void;
+}
+
 export const DeleteModal: React.FC<DeleteModalProps> = ({ isOpen, chatTitle, onClose, onConfirm }) => {
     const [isClosing, setIsClosing] = useState(false);
 
@@ -179,6 +186,79 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialTitle, 
                             </button>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export const DuplicateModal: React.FC<DuplicateModalProps> = ({ isOpen, chatTitle, onClose, onConfirm }) => {
+    const [isClosing, setIsClosing] = useState(false);
+
+    useEffect(() => {
+        if (isOpen) {
+            setIsClosing(false);
+        }
+    }, [isOpen]);
+
+    if (!isOpen && !isClosing) return null;
+
+    const handleClose = () => {
+        setIsClosing(true);
+        setTimeout(() => {
+            onClose();
+            setIsClosing(false);
+        }, 300);
+    };
+
+    const handleConfirm = () => {
+        setIsClosing(true);
+        setTimeout(() => {
+            onConfirm();
+            setIsClosing(false);
+        }, 300);
+    };
+
+    return (
+        <div 
+            className={`fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm ${isClosing ? 'animate-fade-out' : 'animate-fade-in'}`} 
+            dir="rtl"
+            onClick={handleClose}
+        >
+            {/* Modal Content */}
+            <div 
+                className={`relative bg-zeus-surface border border-cyan-500/30 w-full max-w-md rounded-2xl shadow-[0_0_40px_rgba(6,182,212,0.2)] p-6 overflow-hidden ${isClosing ? 'animate-scale-down' : 'animate-scale-up'}`}
+                onClick={(e) => e.stopPropagation()}
+            >
+                {/* Decoration */}
+                <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-500/10 blur-3xl rounded-full pointer-events-none"></div>
+
+                <div className="flex flex-col items-center text-center">
+                    <div className="w-16 h-16 rounded-full bg-cyan-500/10 flex items-center justify-center mb-4 border border-cyan-500/20 shadow-[0_0_15px_rgba(6,182,212,0.2)]">
+                        <i className="fas fa-clone text-2xl text-cyan-500"></i>
+                    </div>
+
+                    <h3 className="text-xl font-bold text-white mb-2">نسخ المحادثة؟</h3>
+                    <p className="text-gray-400 text-sm mb-6 leading-relaxed">
+                        هل تريد إنشاء نسخة طبق الأصل من <span className="text-cyan-400 font-bold">"{chatTitle}"</span>؟
+                        <br />
+                        سيتم إنشاء محادثة جديدة مستقلة تماماً.
+                    </p>
+
+                    <div className="flex gap-3 w-full">
+                        <button
+                            onClick={handleClose}
+                            className="flex-1 py-3 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 font-medium transition-colors border border-white/5"
+                        >
+                            إلغاء
+                        </button>
+                        <button
+                            onClick={handleConfirm}
+                            className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-cyan-800 hover:from-cyan-500 hover:to-cyan-700 text-white font-bold transition-all shadow-lg shadow-cyan-900/40 transform hover:scale-[1.02]"
+                        >
+                            نعم، انسخ
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
