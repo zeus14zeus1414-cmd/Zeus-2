@@ -912,7 +912,7 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                     </div>
                     
                     <div className="text-center mt-2 text-[10px] text-gray-500 font-sans">
-                        زيوس قد يخطئ، راجع المعلومات المهمة.
+                        زيوس قد يخطئ،راجع المعلومات المهمة.
                     </div>
                 </div>
             </div>
