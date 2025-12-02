@@ -16,117 +16,26 @@ export const AI_MODELS = {
     ]
 };
 
+const THINKING_SYSTEM_INSTRUCTION = `
+IMPORTANT: You are currently in "Deep Thinking Mode".
+1. Before answering, you MUST engage in a comprehensive, step-by-step reasoning process.
+2. You MUST enclose your internal monologue and reasoning process strictly within <think> and </think> tags.
+3. CRITICAL: Your internal reasoning (inside <think> tags) MUST BE IN ARABIC LANGUAGE only. Do not think in English.
+4. CRITICAL: You MUST use the exact tags <think> and </think>. Do NOT translate the tags themselves into Arabic (e.g., do NOT use <فكّر>).
+5. The content inside <think> tags will be displayed to the user as your "thought process".
+6. After the closing </think> tag, provide your final, polished answer to the user.
+7. Do NOT be lazy. Analyze the request deeply.
+Format your response exactly like this:
+<think>
+[خطوات التفكير والتحليل العميق يجب أن تكون باللغة العربية هنا...]
+</think>
+[إجابتك النهائية هنا]
+`;
 
-‏export const ARTIFACTS_SYSTEM_INSTRUCTION = `export const ARTIFACTS_SYSTEM_INSTRUCTION = `
-You have access to create and update artifacts - self-contained pieces of content displayed in a side panel.
-
-WHEN TO USE ARTIFACTS:
-- Substantial code (>15 lines)
-- Complete documents or creative writing
-- React components, HTML pages, or visualizations
-- Mermaid diagrams or SVG graphics
-- Content meant to be saved/reused
-
-DO NOT use artifacts for:
-- Short code snippets (<15 lines) - use markdown code blocks instead
-- Conversational responses or explanations
-
-ARTIFACT FORMAT:
-Use this exact XML format:
-
-<antArtifact identifier="unique-id" type="mime-type" title="Title">
-[content here]
-</antArtifact>
-
-TYPES:
-- application/vnd.ant.code - Code with language attribute
-- application/vnd.ant.react - React components
-- text/html - HTML with CSS/JS
-- image/svg+xml - SVG graphics
-- application/vnd.ant.mermaid - Mermaid diagrams
-- text/markdown - Markdown documents
-
-UPDATING ARTIFACTS:
-When user asks to modify existing artifact, you have TWO options:
-
-1. SMALL CHANGES (update method):
-   - Use when changing <20 lines in <5 locations
-   - Call multiple times for different changes
-   - Maximum 4 update calls per response
-
-   Format:
-   <antArtifact identifier="same-id" type="same-type" title="same-title" action="update">
-   <old_str>
-   [EXACT text to find - must match PERFECTLY including whitespace]
-   </old_str>
-   <new_str>
-   [replacement text]
-   </new_str>
-   </antArtifact>
-
-2. LARGE CHANGES (rewrite method):
-   - Use when changes exceed update thresholds
-   - Use for structural changes
-   - Provide complete new version
-
-   Format:
-   <antArtifact identifier="same-id" type="same-type" title="Updated Title" action="rewrite">
-   [complete new content]
-   </antArtifact>
-
-CRITICAL RULES FOR UPDATE:
-- old_str MUST appear EXACTLY ONCE in current content
-- old_str must match PERFECTLY (whitespace, indentation, everything)
-- If uncertain about exact match, use rewrite instead
-- You can make multiple update calls (max 4) in one response
-
-IDENTIFIER RULES:
-- Use descriptive slugs: "weather-app", "todo-list", "data-viz"
-- ALWAYS use the SAME identifier when updating existing artifact
-- Never create new identifier for updates
-
-EXAMPLES:
-
-Creating new artifact:
-<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Blue Button">
-export default function Button() {
-  return <button className="bg-blue-500 text-white px-4 py-2 rounded">Click Me</button>;
-}
-</antArtifact>
-
-Updating (small change):
-<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Blue Button" action="update">
-<old_str>bg-blue-500</old_str>
-<new_str>bg-red-500</new_str>
-</antArtifact>
-
-Multiple updates:
-<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Blue Button" action="update">
-<old_str>bg-blue-500</old_str>
-<new_str>bg-green-500</new_str>
-</antArtifact>
-
-<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Green Button" action="update">
-<old_str>Click Me</old_str>
-<new_str>Press Here</new_str>
-</antArtifact>
-
-Rewriting (major change):
-<antArtifact identifier="button-component" type="application/vnd.ant.react" title="Animated Button" action="rewrite">
-export default function Button() {
-  return (
-    <button className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-6 py-3 rounded-lg hover:scale-105 transition-transform">
-      ✨ Click Me ✨
-    </button>
-  );
-}
-</antArtifact>
-
-IMPORTANT:
-- Place explanations OUTSIDE artifact tags
-- Include ONLY the code/content inside tags
-- No markdown fences (```) inside artifacts
-- Be precise with update old_str - it must match exactly
+const NO_THINKING_INSTRUCTION = `
+IMPORTANT: Do NOT use <think> tags. 
+Do NOT engage in internal monologue or reasoning output. 
+Provide the answer directly and concisely.
 `;
 
 export const streamResponse = async (
@@ -234,116 +143,90 @@ const streamGemini = async (messages: Message[], settings: Settings, onChunk: (c
     const activeKeys = settings.geminiApiKeys.filter(k => k.status === 'active');
     
     return streamWithKeyRotation(activeKeys, 'Gemini', async (apiKey) => {
-        let currentMessages = [...messages];
-        let fullResponse = '';
-        let loopCount = 0;
-        const MAX_LOOPS = 5; 
-        let shouldContinue = true;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:streamGenerateContent?key=${apiKey}&alt=sse`;
 
-        while (shouldContinue && loopCount < MAX_LOOPS) {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:streamGenerateContent?key=${apiKey}&alt=sse`;
-
-            const contents = currentMessages.map(msg => {
-                if (msg.role === 'user') {
-                    const parts: any[] = [];
-                    if (msg.attachments) {
-                        msg.attachments.forEach(att => {
-                            if (att.dataType === 'image') {
-                                parts.push({ inline_data: { mime_type: att.mimeType, data: att.content } });
-                            } else {
-                                parts.push({ text: `\n\n--- محتوى الملف: ${att.name} ---\n${att.content}\n--- نهاية الملف ---\n` });
-                            }
-                        });
-                    }
-                    parts.push({ text: msg.content || " " }); 
-                    return { role: 'user', parts };
+        const contents = messages.map(msg => {
+            if (msg.role === 'user') {
+                const parts: any[] = [];
+                if (msg.attachments) {
+                    msg.attachments.forEach(att => {
+                        if (att.dataType === 'image') {
+                            parts.push({ inline_data: { mime_type: att.mimeType, data: att.content } });
+                        } else {
+                            parts.push({ text: `\n\n--- محتوى الملف: ${att.name} ---\n${att.content}\n--- نهاية الملف ---\n` });
+                        }
+                    });
                 }
-                return { role: 'model', parts: [{ text: msg.content }] };
-            });
-
-            let systemInstructionText = settings.customPrompt || "";
-            // دمج تعليمات Artifacts مع تعليمات التفكير
-            systemInstructionText = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${systemInstructionText}`;
-
-            const generationConfig: any = {
-                temperature: settings.temperature,
-                maxOutputTokens: 8192
-            };
-
-            if (settings.thinkingBudget > 0) {
-                systemInstructionText = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemInstructionText}`;
-                generationConfig.thinkingConfig = { thinkingBudget: settings.thinkingBudget };
-            } else {
-                systemInstructionText = `${NO_THINKING_INSTRUCTION}\n\n${systemInstructionText}`;
-                generationConfig.thinkingConfig = { thinkingBudget: 0 };
+                parts.push({ text: msg.content || " " }); 
+                return { role: 'user', parts };
             }
+            return { role: 'model', parts: [{ text: msg.content }] };
+        });
 
-            const requestBody: any = { contents, generationConfig };
+        let systemInstructionText = settings.customPrompt || "";
+        const generationConfig: any = {
+            temperature: settings.temperature,
+            maxOutputTokens: 8192
+        };
 
-            if (systemInstructionText.trim()) {
-                requestBody.systemInstruction = { parts: [{ text: systemInstructionText }] };
-            }
+        if (settings.thinkingBudget > 0) {
+            systemInstructionText = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemInstructionText}`;
+            generationConfig.thinkingConfig = { thinkingBudget: settings.thinkingBudget };
+        } else {
+            // Explicitly force disable thinking to prevent model defaulting to auto
+            systemInstructionText = `${NO_THINKING_INSTRUCTION}\n\n${systemInstructionText}`;
+            generationConfig.thinkingConfig = { thinkingBudget: 0 };
+        }
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody),
-                signal // تمرير إشارة الإيقاف
-            });
+        const requestBody: any = { contents, generationConfig };
 
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`Gemini Error: ${response.status} - ${errText}`);
-            }
+        if (systemInstructionText.trim()) {
+            requestBody.systemInstruction = { parts: [{ text: systemInstructionText }] };
+        }
 
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let currentLoopResponse = '';
-            let finishReason = '';
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+            signal // تمرير إشارة الإيقاف
+        });
 
-            if (!reader) throw new Error("No response body");
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Gemini Error: ${response.status} - ${errText}`);
+        }
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                
-                const chunk = decoder.decode(value, { stream: true });
-                buffer += chunk;
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-                
-                for (const line of lines) {
-                    const trimmedLine = line.trim();
-                    if (trimmedLine.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(trimmedLine.slice(6));
-                            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                            const reason = data.candidates?.[0]?.finishReason;
-                            
-                            if (reason) finishReason = reason;
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
 
-                            if (text) {
-                                fullResponse += text;
-                                currentLoopResponse += text;
-                                onChunk(text);
-                            }
-                        } catch (e) { }
-                    }
+        if (!reader) throw new Error("No response body");
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (trimmedLine.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(trimmedLine.slice(6));
+                        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                        if (text) {
+                            fullText += text;
+                            onChunk(text);
+                        }
+                    } catch (e) { }
                 }
-            }
-
-            // التحقق مما إذا كان يجب الاستمرار (Auto-Continue)
-            if (finishReason === 'MAX_TOKENS' || finishReason === 'LENGTH') {
-                console.log('Gemini hit max tokens, auto-continuing...');
-                currentMessages.push({ role: 'assistant', content: currentLoopResponse, id: Date.now().toString(), timestamp: Date.now() });
-                loopCount++;
-            } else {
-                shouldContinue = false;
             }
         }
-        
-        return fullResponse;
+        return fullText;
     });
 };
 
@@ -351,8 +234,7 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
     const activeKeys = settings.openrouterApiKeys.filter(k => k.status === 'active');
 
     return streamWithKeyRotation(activeKeys, 'OpenRouter', async (apiKey) => {
-        let currentMessages = [...messages];
-        const formattedMessages = currentMessages.map(m => {
+        const formattedMessages = messages.map(m => {
             let content = m.content;
             if(m.attachments?.length) {
                 m.attachments.forEach(att => {
@@ -363,9 +245,6 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
         });
 
         let systemContent = settings.customPrompt || "";
-        // دمج تعليمات Artifacts
-        systemContent = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
-
         if (settings.thinkingBudget > 0) {
             systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
         } else {
@@ -376,88 +255,64 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
             formattedMessages.unshift({ role: 'system', content: systemContent });
         }
 
-        let fullResponse = '';
-        let loopCount = 0;
-        const MAX_LOOPS = 5;
-        let shouldContinue = true;
-
-        while(shouldContinue && loopCount < MAX_LOOPS) {
-            const extraBody: any = {};
-            if (settings.thinkingBudget > 0 && settings.model.includes('deepseek-r1')) {
-                extraBody.include_reasoning = true;
-            }
-
-            const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json',
-                    'HTTP-Referer': window.location.origin,
-                    'X-Title': 'Zeus Chat'
-                },
-                body: JSON.stringify({
-                    model: settings.model,
-                    messages: formattedMessages,
-                    temperature: settings.temperature,
-                    stream: true,
-                    ...extraBody
-                }),
-                signal // تمرير إشارة الإيقاف
-            });
-
-            if (!response.ok) throw new Error(`OpenRouter Error: ${response.status}`);
-
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let currentLoopResponse = '';
-            let finishReason = '';
-
-            if(!reader) throw new Error("No body");
-
-            while(true) {
-                const {done, value} = await reader.read();
-                if(done) break;
-                
-                const chunk = decoder.decode(value, { stream: true });
-                buffer += chunk;
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-                
-                for(const line of lines) {
-                    const trimmedLine = line.trim();
-                    if(trimmedLine.startsWith('data: ')) {
-                        const dataStr = trimmedLine.slice(6);
-                        if(dataStr === '[DONE]') break;
-                        try {
-                            const data = JSON.parse(dataStr);
-                            const content = data.choices[0]?.delta?.content || data.choices[0]?.delta?.reasoning || '';
-                            const reason = data.choices[0]?.finish_reason;
-                            
-                            if (reason) finishReason = reason;
-
-                            if(content) {
-                                fullResponse += content;
-                                currentLoopResponse += content;
-                                onChunk(content);
-                            }
-                        } catch(e) {}
-                    }
-                }
-            }
-
-             // منطق المتابعة لـ OpenRouter
-             if (finishReason === 'length') {
-                console.log('OpenRouter hit length limit, auto-continuing...');
-                formattedMessages.push({ role: 'assistant', content: currentLoopResponse });
-                formattedMessages.push({ role: 'user', content: 'Continue exactly from where you stopped.' });
-                loopCount++;
-            } else {
-                shouldContinue = false;
-            }
+        const extraBody: any = {};
+        if (settings.thinkingBudget > 0 && settings.model.includes('deepseek-r1')) {
+            extraBody.include_reasoning = true;
         }
 
-        return fullResponse;
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': window.location.origin,
+                'X-Title': 'Zeus Chat'
+            },
+            body: JSON.stringify({
+                model: settings.model,
+                messages: formattedMessages,
+                temperature: settings.temperature,
+                stream: true,
+                ...extraBody
+            }),
+            signal // تمرير إشارة الإيقاف
+        });
+
+        if (!response.ok) throw new Error(`OpenRouter Error: ${response.status}`);
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
+
+        if(!reader) throw new Error("No body");
+
+        while(true) {
+            const {done, value} = await reader.read();
+            if(done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for(const line of lines) {
+                const trimmedLine = line.trim();
+                if(trimmedLine.startsWith('data: ')) {
+                    const dataStr = trimmedLine.slice(6);
+                    if(dataStr === '[DONE]') break;
+                    try {
+                        const data = JSON.parse(dataStr);
+                        const content = data.choices[0]?.delta?.content || data.choices[0]?.delta?.reasoning || '';
+                        if(content) {
+                            fullText += content;
+                            onChunk(content);
+                        }
+                    } catch(e) {}
+                }
+            }
+        }
+        return fullText;
     });
 };
 
@@ -476,9 +331,6 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
         });
 
         let systemContent = settings.customPrompt || "";
-        // دمج تعليمات Artifacts
-        systemContent = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
-
         if (settings.thinkingBudget > 0) {
             systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
         } else {
@@ -501,13 +353,14 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
                 model: settings.model,
                 messages: formattedMessages,
                 temperature: settings.temperature,
-                stream: true 
+                stream: true // تفعيل الستريمنج الحقيقي
             }),
             signal // تمرير إشارة الإيقاف
         });
 
         if (!response.ok) throw new Error(`Custom Provider Error: ${response.status}`);
 
+        // استخدام الـ Reader لقراءة التدفق الحقيقي
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         let fullText = '';
@@ -526,19 +379,23 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
             
             for (const line of lines) {
                 const trimmedLine = line.trim();
+                // معالجة صيغة SSE القياسية (data: {...})
                 if (trimmedLine.startsWith('data: ')) {
                     const dataStr = trimmedLine.slice(6);
                     if (dataStr === '[DONE]') break;
                     
                     try {
                         const data = JSON.parse(dataStr);
+                        // دعم معظم المزودين المتوافقين مع OpenAI
                         const content = data.choices?.[0]?.delta?.content || data.choices?.[0]?.text || '';
                         
                         if (content) {
                             fullText += content;
                             onChunk(content);
                         }
-                    } catch (e) {}
+                    } catch (e) {
+                        // تجاهل أخطاء البارسنج للسطور غير المكتملة
+                    }
                 }
             }
         }
