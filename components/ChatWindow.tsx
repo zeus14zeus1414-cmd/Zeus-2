@@ -13,476 +13,248 @@ interface Props {
     settings: Settings;
 }
 
-// نظام الـ Artifacts المحسّن - يطابق سلوك Claude تماماً
-interface ArtifactVersion {
-    content: string;
-    timestamp: number;
-    changeDescription?: string;
-}
-
 interface ArtifactData {
     identifier: string;
     type: string;
     title: string;
     content: string;
-    language: string;
-    versions: ArtifactVersion[];
-    currentVersion: number;
-}
-
-// مدير الـ Artifacts العالمي - يحفظ كل الإصدارات والتعديلات
-class ArtifactsManager {
-    private artifacts: Map<string, ArtifactData> = new Map();
-    
-    // إنشاء أو تحديث artifact
-    updateArtifact(identifier: string, content: string, type: string, title: string): ArtifactData {
-        const existing = this.artifacts.get(identifier);
-        const language = this.detectLanguage(type, title);
-        
-        if (existing) {
-            // إضافة نسخة جديدة
-            const newVersion: ArtifactVersion = {
-                content,
-                timestamp: Date.now(),
-            };
-            
-            existing.versions.push(newVersion);
-            existing.currentVersion = existing.versions.length - 1;
-            existing.content = content;
-            existing.title = title;
-            existing.type = type;
-            
-            return { ...existing };
-        } else {
-            // إنشاء artifact جديد
-            const newArtifact: ArtifactData = {
-                identifier,
-                type,
-                title,
-                content,
-                language,
-                versions: [{ content, timestamp: Date.now() }],
-                currentVersion: 0,
-            };
-            
-            this.artifacts.set(identifier, newArtifact);
-            return { ...newArtifact };
-        }
-    }
-    
-    // الحصول على artifact
-    getArtifact(identifier: string): ArtifactData | null {
-        const artifact = this.artifacts.get(identifier);
-        return artifact ? { ...artifact } : null;
-    }
-    
-    // الانتقال إلى نسخة محددة
-    goToVersion(identifier: string, versionIndex: number): ArtifactData | null {
-        const artifact = this.artifacts.get(identifier);
-        if (!artifact || versionIndex < 0 || versionIndex >= artifact.versions.length) {
-            return null;
-        }
-        
-        artifact.currentVersion = versionIndex;
-        artifact.content = artifact.versions[versionIndex].content;
-        return { ...artifact };
-    }
-    
-    private detectLanguage(type: string, title: string): string {
-        const lowerTitle = title.toLowerCase();
-        if (type.includes('react') || lowerTitle.endsWith('.tsx') || lowerTitle.endsWith('.jsx')) return 'javascript';
-        if (type.includes('html') || lowerTitle.endsWith('.html')) return 'html';
-        if (type.includes('css') || lowerTitle.endsWith('.css')) return 'css';
-        if (type.includes('python') || lowerTitle.endsWith('.py')) return 'python';
-        if (type.includes('json') || lowerTitle.endsWith('.json')) return 'json';
-        if (type.includes('markdown') || lowerTitle.endsWith('.md')) return 'markdown';
-        if (type.includes('typescript') || lowerTitle.endsWith('.ts')) return 'typescript';
-        if (type.includes('mermaid')) return 'mermaid';
-        return 'plaintext';
-    }
-    
-    // إعادة تعيين كل شيء (عند تغيير المحادثة)
-    reset() {
-        this.artifacts.clear();
-    }
-    
-    // الحصول على جميع الـ artifacts
-    getAllArtifacts(): ArtifactData[] {
-        return Array.from(this.artifacts.values()).map(a => ({ ...a }));
-    }
+    isComplete: boolean;
+    action: 'full' | 'diff';
+    version: number; // رقم النسخة لتتبع التعديلات
 }
 
 type MessageBlock = 
     | { type: 'text'; content: string }
-    | { type: 'artifact'; identifier: string };
+    | { type: 'artifact'; data: ArtifactData };
 
-const MAX_COLLAPSED_LENGTH_CHARS = 350;
+const MAX_COLLAPSED_LENGTH_CHARS = 350; 
 
-// تحليل محتوى الرسالة وفصل النص عن الـ artifacts
-const parseMessageContent = (content: string, manager: ArtifactsManager): MessageBlock[] => {
-    const blocks: MessageBlock[] = [];
-    const artifactRegex = /<antArtifact\s+identifier="([^"]*)"\s+type="([^"]*)"\s+title="([^"]*)"(?:\s+action="([^"]*)")?\s*>([\s\S]*?)<\/antArtifact>/g;
-    
-    let lastIndex = 0;
-    let match;
-    
-    while ((match = artifactRegex.exec(content)) !== null) {
-        // إضافة النص قبل الـ artifact
-        const textBefore = content.slice(lastIndex, match.index).trim();
-        if (textBefore) {
-            blocks.push({ type: 'text', content: textBefore });
+// دالة مساعدة لاكتشاف لغة البرمجة
+const detectLanguage = (type: string, title: string): string => {
+    const lowerTitle = title.toLowerCase();
+    if (type.includes('react') || lowerTitle.endsWith('.tsx') || lowerTitle.endsWith('.jsx')) return 'javascript';
+    if (type.includes('html') || lowerTitle.endsWith('.html')) return 'html';
+    if (type.includes('css') || lowerTitle.endsWith('.css')) return 'css';
+    if (type.includes('python') || lowerTitle.endsWith('.py')) return 'python';
+    if (type.includes('json') || lowerTitle.endsWith('.json')) return 'json';
+    if (type.includes('markdown') || lowerTitle.endsWith('.md')) return 'markdown';
+    if (type.includes('typescript') || lowerTitle.endsWith('.ts')) return 'typescript';
+    if (type.includes('sql') || lowerTitle.endsWith('.sql')) return 'sql';
+    if (type.includes('xml') || lowerTitle.endsWith('.xml')) return 'xml';
+    return 'plaintext';
+};
+
+// --- محرك الدمج (The Patch Engine) ---
+const applyPatch = (original: string, patch: string): string => {
+    // التحقق من وجود كتل البحث والاستبدال
+    if (patch.includes('<<<<') && patch.includes('====') && patch.includes('>>>>')) {
+        let result = original;
+        const blocks = patch.split('>>>>');
+        for (const block of blocks) {
+            if (block.includes('<<<<')) {
+                const [_, content] = block.split('<<<<');
+                const parts = content.split('====');
+                if (parts.length === 2) {
+                    const search = parts[0].trim();
+                    const replace = parts[1].trim();
+                    // محاولة الاستبدال (مع تساهل بسيط في المسافات إذا لزم الأمر مستقبلاً)
+                    if (search && result.includes(search)) {
+                        result = result.replace(search, replace);
+                    }
+                }
+            }
         }
-        
-        // معالجة الـ artifact
-        const [, identifier, type, title, , artifactContent] = match;
-        manager.updateArtifact(identifier, artifactContent.trim(), type, title);
-        blocks.push({ type: 'artifact', identifier });
-        
-        lastIndex = match.index + match[0].length;
+        return result;
     }
-    
-    // إضافة النص المتبقي
-    const textAfter = content.slice(lastIndex).trim();
-    if (textAfter) {
-        blocks.push({ type: 'text', content: textAfter });
-    }
-    
+    // إذا لم يكن باتش نمطي، نعيده كما هو (لأنه قد يكون استبدال كامل أو خطأ)
+    return patch; 
+};
+
+// دالة تحليل النصوص وتقسيمها إلى كتل
+// هام: هذه الدالة الآن تحتاج "سياق" (Registry) لتعرف محتوى الملف الأصلي عند الدمج
+// لكن بما أنها دالة نقية، سنقوم بالدمج لاحقاً في الـ Components أو نمرر السجل لها.
+// الحل الأفضل: فصل التحليل عن الدمج. التحليل يستخرج ما هو مكتوب، والدمج يحدث عند العرض.
+const parseMessageBlocks = (content: string): MessageBlock[] => {
+    const blocks: MessageBlock[] = [];
+    const regex = /(<antArtifact\s+(?:[^>]*?)>[\s\S]*?(?:<\/antArtifact>|$))/g;
+    const parts = content.split(regex);
+
+    parts.forEach(part => {
+        if (!part.trim()) return;
+
+        const artifactMatch = part.match(/^<antArtifact\s+identifier="([^"]*)"\s+type="([^"]*)"\s+title="([^"]*)"(?:\s+action="([^"]*)")?>([\s\S]*?)(?:<\/antArtifact>|$)$/);
+
+        if (artifactMatch) {
+            const [fullMatch, identifier, type, title, actionStr, innerContent] = artifactMatch;
+            blocks.push({
+                type: 'artifact',
+                data: {
+                    identifier,
+                    type,
+                    title,
+                    action: (actionStr as 'diff' | 'full') || 'full',
+                    content: innerContent, 
+                    isComplete: fullMatch.endsWith('</antArtifact>'),
+                    version: 1 // مبدئياً
+                }
+            });
+        } else {
+            if (part.length > 0) {
+                blocks.push({ type: 'text', content: part });
+            }
+        }
+    });
+
     return blocks;
 };
 
-// --- مكون عارض الـ Artifact (اللوحة الجانبية) ---
-const ArtifactViewer = ({ 
-    artifact, 
-    onClose, 
-    isOpen, 
-    onVersionChange,
-    onExport 
-}: { 
-    artifact: ArtifactData | null;
-    onClose: () => void;
-    isOpen: boolean;
-    onVersionChange: (versionIndex: number) => void;
-    onExport: (format: 'copy' | 'download') => void;
+// --- مكون عرض الـ Artifact (النافذة الجانبية) ---
+const ArtifactViewer = ({ artifact, onClose, isOpen, isFullscreen, onToggleFullscreen }: { 
+    artifact: ArtifactData | null, 
+    onClose: () => void, 
+    isOpen: boolean,
+    isFullscreen: boolean,
+    onToggleFullscreen: () => void
 }) => {
     const [activeTab, setActiveTab] = useState<'code' | 'preview'>('code');
     const [copyState, setCopyState] = useState(false);
-    const [isFullscreen, setIsFullscreen] = useState(false);
-    const [showVersions, setShowVersions] = useState(false);
     const codeRef = useRef<HTMLElement>(null);
-    const iframeRef = useRef<HTMLIFrameElement>(null);
 
-    // تطبيق syntax highlighting
     useEffect(() => {
         if (artifact && codeRef.current && activeTab === 'code') {
             delete (codeRef.current as any).dataset.highlighted;
             hljs.highlightElement(codeRef.current);
         }
-    }, [artifact?.content, activeTab, artifact?.language]);
-
-    // تحديث المعاينة للـ HTML/React
-    useEffect(() => {
-        if (artifact && activeTab === 'preview' && iframeRef.current) {
-            const iframe = iframeRef.current;
-            const doc = iframe.contentDocument || iframe.contentWindow?.document;
-            
-            if (doc && (artifact.type.includes('html') || artifact.type.includes('react'))) {
-                doc.open();
-                doc.write(artifact.content);
-                doc.close();
-            }
-        }
-    }, [artifact?.content, activeTab, artifact?.type]);
+    }, [artifact?.content, activeTab, isOpen, artifact?.type]); 
 
     if (!artifact) return null;
 
-    const canPreview = artifact.type.includes('html') || artifact.type.includes('react') || artifact.type.includes('mermaid');
+    const language = detectLanguage(artifact.type, artifact.title);
 
     const handleCopy = () => {
         navigator.clipboard.writeText(artifact.content);
         setCopyState(true);
         setTimeout(() => setCopyState(false), 2000);
-        onExport('copy');
     };
 
     const handleDownload = () => {
-        onExport('download');
+        const blob = new Blob([artifact.content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = artifact.title.includes('.') ? artifact.title : `${artifact.title}.${language === 'python' ? 'py' : 'txt'}`;
+        a.click();
+        URL.revokeObjectURL(url);
     };
 
     return (
-        <>
-            {/* Overlay للموبايل */}
-            {isOpen && (
-                <div 
-                    className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[55] md:hidden"
-                    onClick={onClose}
-                />
-            )}
-            
-            {/* اللوحة الجانبية */}
-            <div className={`
-                fixed md:static inset-y-0 right-0 z-[60] flex flex-col bg-[#0a0a0a]
-                border-l border-zeus-gold/20 shadow-[-10px_0_30px_rgba(0,0,0,0.5)]
-                transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]
-                ${isFullscreen ? 'fixed inset-0 z-[100] w-screen' : ''}
-                ${isOpen && !isFullscreen ? 'translate-x-0 w-[90vw] md:w-[600px] lg:w-[700px]' : 'translate-x-full w-0'}
-            `}>
-                
-                {/* Header */}
-                <div className="h-16 flex-shrink-0 flex items-center justify-between px-4 border-b border-zeus-gold/20 bg-gradient-to-r from-[#0a0a0a] to-[#111]">
-                    <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0">
-                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-zeus-gold/20 to-yellow-600/20 flex items-center justify-center border border-zeus-gold/30 flex-shrink-0 shadow-[0_0_15px_rgba(255,215,0,0.2)]">
-                            <i className="fas fa-file-code text-zeus-gold"></i>
-                        </div>
-                        <div className="flex flex-col overflow-hidden min-w-0">
-                            <h3 className="text-sm font-bold text-white truncate" dir="ltr">
-                                {artifact.title}
-                            </h3>
-                            <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-gray-400 font-mono uppercase">
-                                    {artifact.language}
-                                </span>
-                                {artifact.versions.length > 1 && (
-                                    <>
-                                        <span className="text-gray-600">•</span>
-                                        <button 
-                                            onClick={() => setShowVersions(!showVersions)}
-                                            className="text-[10px] text-zeus-gold/80 hover:text-zeus-gold font-mono flex items-center gap-1"
-                                        >
-                                            <i className="fas fa-history"></i>
-                                            v{artifact.currentVersion + 1}/{artifact.versions.length}
-                                        </button>
-                                    </>
-                                )}
-                            </div>
-                        </div>
+        <div className={`
+            transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] flex flex-col bg-[#0d0d0d]
+            ${isFullscreen 
+                ? 'fixed inset-0 z-[100] w-full h-full' 
+                : `fixed inset-0 z-[60] md:static md:z-auto md:inset-auto ${isOpen ? 'translate-x-0 opacity-100 md:w-1/2 md:border-r md:border-zeus-gold/20' : 'translate-x-full opacity-0 md:w-0 md:border-none md:overflow-hidden pointer-events-none'}`
+            }
+        `}>
+            <div className="h-14 flex items-center justify-between px-4 border-b border-zeus-gold/20 bg-zeus-surface shrink-0">
+                <div className="flex items-center gap-3 overflow-hidden">
+                    <button onClick={onClose} className="md:hidden text-gray-400 hover:text-white">
+                        <i className="fas fa-arrow-right"></i>
+                    </button>
+                    <div className="w-8 h-8 rounded bg-zeus-gold/10 flex items-center justify-center border border-zeus-gold/20 text-zeus-gold shrink-0">
+                        <i className="fas fa-code"></i>
                     </div>
-
-                    <div className="flex items-center gap-1">
-                        {/* Tabs */}
-                        <div className="hidden md:flex bg-black/50 rounded-lg p-1 border border-white/5 mr-2">
-                            <button 
-                                onClick={() => setActiveTab('code')}
-                                className={`px-3 py-1.5 text-xs rounded-md transition-all font-medium ${
-                                    activeTab === 'code' 
-                                        ? 'bg-zeus-gold text-black' 
-                                        : 'text-gray-400 hover:text-white'
-                                }`}
-                            >
-                                <i className="fas fa-code mr-1"></i>
-                                Code
-                            </button>
-                            <button 
-                                onClick={() => canPreview && setActiveTab('preview')}
-                                className={`px-3 py-1.5 text-xs rounded-md transition-all font-medium ${
-                                    !canPreview 
-                                        ? 'text-gray-600 cursor-not-allowed opacity-40' 
-                                        : activeTab === 'preview'
-                                        ? 'bg-zeus-gold text-black'
-                                        : 'text-gray-400 hover:text-white'
-                                }`}
-                                disabled={!canPreview}
-                            >
-                                <i className="fas fa-eye mr-1"></i>
-                                Preview
-                            </button>
-                        </div>
-
-                        <div className="w-px h-6 bg-white/10 mx-1"></div>
-
-                        {/* Actions */}
-                        <button 
-                            onClick={() => setIsFullscreen(!isFullscreen)} 
-                            className="w-9 h-9 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-all flex items-center justify-center"
-                            title={isFullscreen ? "تصغير" : "ملء الشاشة"}
-                        >
-                            <i className={`fas ${isFullscreen ? 'fa-compress' : 'fa-expand'} text-sm`}></i>
-                        </button>
-
-                        <button 
-                            onClick={handleCopy}
-                            className="w-9 h-9 rounded-lg hover:bg-white/10 text-gray-400 hover:text-zeus-gold transition-all flex items-center justify-center"
-                            title="نسخ الكود"
-                        >
-                            <i className={`fas ${copyState ? 'fa-check text-green-500' : 'fa-copy'} text-sm`}></i>
-                        </button>
-
-                        <button 
-                            onClick={handleDownload}
-                            className="w-9 h-9 rounded-lg hover:bg-white/10 text-gray-400 hover:text-zeus-gold transition-all flex items-center justify-center"
-                            title="تنزيل الملف"
-                        >
-                            <i className="fas fa-download text-sm"></i>
-                        </button>
-
-                        <div className="w-px h-6 bg-white/10 mx-1"></div>
-
-                        <button 
-                            onClick={onClose}
-                            className="w-9 h-9 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-500 transition-all flex items-center justify-center"
-                            title="إغلاق"
-                        >
-                            <i className="fas fa-times text-sm"></i>
-                        </button>
+                    <div className="flex flex-col overflow-hidden">
+                        <h3 className="text-sm font-bold text-white truncate w-full" dir="ltr">{artifact.title}</h3>
+                        <span className="text-[10px] text-gray-500 font-mono truncate">
+                            {language} {artifact.version > 1 ? `• v${artifact.version}` : ''}
+                        </span>
                     </div>
                 </div>
 
-                {/* قائمة الإصدارات */}
-                {showVersions && artifact.versions.length > 1 && (
-                    <div className="border-b border-zeus-gold/20 bg-[#0d0d0d] max-h-48 overflow-y-auto custom-scrollbar">
-                        <div className="p-3 space-y-1">
-                            {artifact.versions.map((version, index) => (
-                                <button
-                                    key={index}
-                                    onClick={() => {
-                                        onVersionChange(index);
-                                        setShowVersions(false);
-                                    }}
-                                    className={`w-full text-left px-3 py-2 rounded-lg transition-all text-xs ${
-                                        index === artifact.currentVersion
-                                            ? 'bg-zeus-gold/20 text-zeus-gold border border-zeus-gold/30'
-                                            : 'bg-black/30 text-gray-400 hover:bg-white/5 hover:text-white border border-white/5'
-                                    }`}
-                                >
-                                    <div className="flex items-center justify-between">
-                                        <span className="font-mono font-bold">النسخة {index + 1}</span>
-                                        <span className="text-[10px] opacity-60">
-                                            {new Date(version.timestamp).toLocaleTimeString('ar-SA', {
-                                                hour: '2-digit',
-                                                minute: '2-digit'
-                                            })}
-                                        </span>
-                                    </div>
-                                    {version.changeDescription && (
-                                        <p className="text-[10px] opacity-70 mt-1">{version.changeDescription}</p>
-                                    )}
-                                </button>
-                            ))}
-                        </div>
+                <div className="flex items-center gap-2">
+                    <div className="hidden md:flex bg-black/50 rounded-lg p-1 border border-white/10">
+                        <button 
+                            onClick={() => setActiveTab('code')}
+                            className={`px-3 py-1 text-xs rounded-md transition-all ${activeTab === 'code' ? 'bg-white/10 text-white font-bold' : 'text-gray-500 hover:text-gray-300'}`}
+                        >
+                            Code
+                        </button>
+                        <button 
+                            className="px-3 py-1 text-xs rounded-md text-gray-600 cursor-not-allowed opacity-50"
+                            title="المعاينة الحية قريباً"
+                        >
+                            Preview
+                        </button>
                     </div>
-                )}
-
-                {/* المحتوى */}
-                <div className="flex-1 overflow-hidden relative bg-[#0d0d0d]">
-                    {activeTab === 'code' ? (
-                        <div className="h-full overflow-auto custom-scrollbar">
-                            <pre className="m-0 p-6 text-sm font-mono leading-relaxed" dir="ltr">
-                                <code 
-                                    ref={codeRef} 
-                                    className={`language-${artifact.language} bg-transparent`}
-                                >
-                                    {artifact.content}
-                                </code>
-                            </pre>
-                        </div>
-                    ) : (
-                        <div className="h-full overflow-auto">
-                            {artifact.type.includes('mermaid') ? (
-                                <div className="flex items-center justify-center h-full p-6 bg-white">
-                                    <div className="text-center">
-                                        <i className="fas fa-diagram-project text-6xl text-gray-400 mb-4"></i>
-                                        <p className="text-gray-600">معاينة Mermaid قريباً</p>
-                                    </div>
-                                </div>
-                            ) : (
-                                <iframe
-                                    ref={iframeRef}
-                                    className="w-full h-full border-0 bg-white"
-                                    sandbox="allow-scripts allow-same-origin"
-                                    title="Preview"
-                                />
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                {/* Footer - معلومات إضافية */}
-                <div className="h-10 flex-shrink-0 flex items-center justify-between px-4 border-t border-zeus-gold/20 bg-[#0a0a0a] text-[10px] text-gray-500">
-                    <span>{artifact.content.split('\n').length} سطر</span>
-                    <span>{artifact.content.length.toLocaleString()} حرف</span>
+                    <div className="w-px h-4 bg-white/10 mx-1"></div>
+                    <button onClick={onToggleFullscreen} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors hidden md:flex items-center justify-center" title={isFullscreen ? "تصغير" : "تكبير"}>
+                        <i className={`fas ${isFullscreen ? 'fa-compress' : 'fa-expand'}`}></i>
+                    </button>
+                    <button onClick={handleCopy} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="نسخ">
+                        <i className={`fas ${copyState ? 'fa-check text-green-500' : 'fa-copy'}`}></i>
+                    </button>
+                    <button onClick={handleDownload} className="w-8 h-8 rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors" title="تنزيل">
+                        <i className="fas fa-download"></i>
+                    </button>
+                    <button onClick={onClose} className="hidden md:block w-8 h-8 rounded hover:bg-red-500/10 text-gray-400 hover:text-red-500 transition-colors" title="إغلاق اللوحة">
+                        <i className="fas fa-times"></i>
+                    </button>
                 </div>
             </div>
-        </>
+
+            <div className="flex-1 overflow-auto custom-scrollbar relative bg-[#0d0d0d]" dir="ltr">
+                {activeTab === 'code' ? (
+                    <pre className="m-0 p-4 md:p-6 text-sm font-mono leading-relaxed">
+                        <code ref={codeRef} className={`language-${language} bg-transparent p-0`}>
+                            {artifact.content}
+                        </code>
+                    </pre>
+                ) : (
+                    <div className="flex items-center justify-center h-full text-gray-500">
+                        <p>Preview Mode Coming Soon...</p>
+                    </div>
+                )}
+            </div>
+        </div>
     );
 };
 
-// --- بطاقة الـ Artifact في المحادثة ---
-const ArtifactCard = ({ 
-    identifier, 
-    manager, 
-    onClick,
-    isLatest 
-}: { 
-    identifier: string;
-    manager: ArtifactsManager;
-    onClick: () => void;
-    isLatest: boolean;
-}) => {
-    const artifact = manager.getArtifact(identifier);
-    
-    if (!artifact) return null;
-
-    const hasMultipleVersions = artifact.versions.length > 1;
+const ArtifactCard = ({ data, onClick, isStreaming, isLast }: { data: ArtifactData, onClick: () => void, isStreaming: boolean, isLast: boolean }) => {
+    const language = detectLanguage(data.type, data.title);
+    const isDiff = data.action === 'diff';
     
     return (
         <div 
             onClick={onClick}
-            className="my-4 group/card cursor-pointer bg-gradient-to-br from-[#0a0a0a] to-[#111] border border-zeus-gold/30 hover:border-zeus-gold rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-[0_0_30px_rgba(255,215,0,0.15)] hover:scale-[1.02] w-full max-w-2xl"
+            className="my-3 group/card cursor-pointer bg-[#0a0a0a] hover:bg-[#111] border border-zeus-gold/20 hover:border-zeus-gold/50 rounded-xl overflow-hidden transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,215,0,0.1)] hover:-translate-y-1 w-full max-w-md"
         >
-            <div className="p-5 flex items-center gap-4">
-                {/* Icon */}
-                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-zeus-gold/20 to-yellow-600/20 flex items-center justify-center border border-zeus-gold/40 group-hover/card:scale-110 group-hover/card:shadow-[0_0_20px_rgba(255,215,0,0.3)] transition-all flex-shrink-0">
-                    <i className={`fas ${
-                        artifact.language === 'javascript' || artifact.language === 'typescript' 
-                            ? 'fa-react text-blue-400' 
-                            : artifact.language === 'python'
-                            ? 'fa-python text-green-400'
-                            : artifact.language === 'html'
-                            ? 'fa-html5 text-orange-400'
-                            : 'fa-code text-zeus-gold'
-                    } text-2xl`}></i>
+            <div className="p-4 flex items-center gap-4">
+                <div className="w-12 h-12 rounded-lg bg-zeus-gold/10 flex items-center justify-center border border-zeus-gold/20 group-hover/card:bg-zeus-gold/20 transition-colors">
+                    <i className={`fas ${language === 'javascript' ? 'fa-react text-blue-400' : 'fa-code text-zeus-gold'} text-2xl`}></i>
                 </div>
-
-                {/* Content */}
                 <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                        <h4 className="font-bold text-white text-base truncate" dir="ltr">
-                            {artifact.title}
-                        </h4>
-                        <span className="text-[10px] px-2 py-1 rounded-full bg-black/50 text-gray-400 border border-white/10 font-mono uppercase">
-                            {artifact.language}
+                    <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-bold text-white text-sm truncate" dir="ltr">{data.title}</h4>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5 font-mono">
+                            {language}
                         </span>
-                    </div>
-                    
-                    <div className="flex items-center gap-3 text-xs text-gray-500">
-                        <span className="flex items-center gap-1">
-                            <i className="fas fa-code text-zeus-gold/50"></i>
-                            {artifact.content.split('\n').length} سطر
-                        </span>
-                        {hasMultipleVersions && (
-                            <span className="flex items-center gap-1 text-zeus-gold/80">
-                                <i className="fas fa-history"></i>
-                                {artifact.versions.length} نسخة
-                            </span>
-                        )}
-                        {isLatest && (
-                            <span className="flex items-center gap-1 text-green-400 animate-pulse">
-                                <i className="fas fa-circle text-[6px]"></i>
-                                محدّث الآن
+                        {isDiff && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold animate-pulse">
+                                تحديث (نسخة {data.version})
                             </span>
                         )}
                     </div>
+                    <p className="text-xs text-gray-500 truncate">
+                        {isDiff ? 'تم دمج التعديلات وعرض الملف الكامل' : 'اضغط لعرض المحتوى الكامل'}
+                    </p>
                 </div>
-
-                {/* Arrow */}
-                <div className="w-10 h-10 rounded-full bg-zeus-gold/10 border border-zeus-gold/30 flex items-center justify-center text-zeus-gold group-hover/card:bg-zeus-gold group-hover/card:text-black transition-all flex-shrink-0">
-                    <i className="fas fa-arrow-left group-hover/card:scale-110 transition-transform"></i>
+                <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover/card:text-white group-hover/card:bg-zeus-gold/20 transition-all">
+                    <i className="fas fa-arrow-left group-hover/card:-translate-x-1 transition-transform"></i>
                 </div>
             </div>
-
-            {/* شريط التحميل للـ artifacts قيد الإنشاء */}
-            {isLatest && (
-                <div className="h-1 w-full bg-zeus-gold/20 overflow-hidden">
-                    <div className="h-full w-full bg-gradient-to-r from-transparent via-zeus-gold to-transparent animate-shimmer"></div>
+            {!data.isComplete && isStreaming && isLast && (
+                <div className="h-0.5 w-full bg-zeus-gold/10 overflow-hidden">
+                    <div className="h-full bg-zeus-gold animate-progress-indeterminate"></div>
                 </div>
             )}
         </div>
@@ -490,37 +262,67 @@ const ArtifactCard = ({
 };
 
 // --- مكون الرسالة ---
-const MessageItem = React.memo(({ 
-    msg, 
-    isLast, 
-    isStreaming,
-    forceThinkEnabled,
-    settings,
-    onAttachmentClick,
-    onOpenArtifact,
-    manager
-}: { 
-    msg: Message;
-    isLast: boolean;
-    isStreaming: boolean;
-    forceThinkEnabled: boolean;
-    settings: Settings;
-    onAttachmentClick: (att: Attachment) => void;
-    onOpenArtifact: (identifier: string) => void;
-    manager: ArtifactsManager;
+// التعديل الرئيسي هنا: تمرير السجل (Registry) للرسالة لكي تدمج المحتوى قبل العرض
+const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, settings, onAttachmentClick, onOpenArtifact, globalRegistry }: { 
+    msg: Message, 
+    isLast: boolean, 
+    isStreaming: boolean, 
+    forceThinkEnabled: boolean, 
+    settings: Settings,
+    onAttachmentClick: (att: Attachment) => void,
+    onOpenArtifact: (data: ArtifactData) => void,
+    globalRegistry: Record<string, string> // السجل العالمي
 }) => {
     const isUser = msg.role === 'user';
     const [isExpanded, setIsExpanded] = useState(false);
     const [isThinkingExpanded, setIsThinkingExpanded] = useState(false);
     const [blocks, setBlocks] = useState<MessageBlock[]>([]);
     const [thinkContent, setThinkContent] = useState('');
+    
+    // حساب الكتل "المدمجة" (Hydrated Blocks)
+    // هذا هو الحل: بدلاً من عرض الـ diff كما هو، نقوم بدمجه مع ما نعرفه مسبقاً
+    const hydratedBlocks = useMemo(() => {
+        // نصنع نسخة محلية من السجل لتتبع التغييرات داخل الرسالة الواحدة (في حال وجود تحديثات متعددة)
+        let localRegistry = { ...globalRegistry }; 
+        
+        return blocks.map(block => {
+            if (block.type === 'artifact') {
+                const { identifier, action, content } = block.data;
+                let finalContent = content;
+                let version = 1;
 
-    // تحليل المحتوى
+                // إذا كان هذا artifact معروف سابقاً في السجل (حتى لو كان من رسالة سابقة)
+                if (localRegistry[identifier]) {
+                    if (action === 'diff') {
+                        finalContent = applyPatch(localRegistry[identifier], content);
+                        version = 2; // يمكن تحسين المنطق لحساب النسخ بدقة أكبر لاحقاً
+                    } else {
+                        // إذا كان full update، فإنه يستبدل القديم
+                        finalContent = content;
+                        version = 1; 
+                    }
+                }
+                
+                // تحديث السجل المحلي للملفات التالية في نفس الرسالة
+                localRegistry[identifier] = finalContent;
+
+                return {
+                    ...block,
+                    data: {
+                        ...block.data,
+                        content: finalContent, // المحتوى الآن هو الملف الكامل
+                        version
+                    }
+                };
+            }
+            return block;
+        });
+    }, [blocks, globalRegistry]);
+
     useEffect(() => {
         let text = msg.content || '';
         let extractedThink = '';
         
-        // استخراج محتوى التفكير
         const completeThinkRegex = /<(?:think|فكّر|تفكير)>([\s\S]*?)<\/(?:think|فكّر|تفكير)>/gi;
         let match;
         while ((match = completeThinkRegex.exec(text)) !== null) {
@@ -541,25 +343,38 @@ const MessageItem = React.memo(({
         if (msg.role === 'user') {
             setBlocks([{ type: 'text', content: text }]);
         } else {
-            const parsedBlocks = parseMessageContent(text, manager);
+            const parsedBlocks = parseMessageBlocks(text);
             setBlocks(parsedBlocks);
-            
-            // فتح آخر artifact تلقائياً
-            if (isLast && isStreaming && parsedBlocks.length > 0) {
+
+            // فتح آخر Artifact تلقائياً مع المحتوى المدمج
+            if (isLast && isStreaming) {
                 const lastBlock = parsedBlocks[parsedBlocks.length - 1];
-                if (lastBlock.type === 'artifact') {
-                    onOpenArtifact(lastBlock.identifier);
+                if (lastBlock && lastBlock.type === 'artifact') {
+                    // هنا نحتاج إلى النسخة المدمجة لفتحها
+                    // بما أن الـ effect يعمل قبل الـ useMemo أحياناً، نقوم بدمج سريع للتأكد
+                    const original = globalRegistry[lastBlock.data.identifier] || '';
+                    const contentToShow = lastBlock.data.action === 'diff' 
+                        ? applyPatch(original, lastBlock.data.content)
+                        : lastBlock.data.content;
+                        
+                    onOpenArtifact({ ...lastBlock.data, content: contentToShow });
                 }
             }
         }
-    }, [msg.content, isLast, isStreaming, onOpenArtifact, msg.role, manager]);
 
+    }, [msg.content, isLast, isStreaming, onOpenArtifact, msg.role, globalRegistry]); // أضفنا globalRegistry
+    
     const fullTextAnswer = useMemo(() => {
-        return blocks.filter(b => b.type === 'text').map(b => (b as any).content).join('\n');
-    }, [blocks]);
+        return hydratedBlocks.filter(b => b.type === 'text').map(b => (b as any).content).join('\n');
+    }, [hydratedBlocks]);
 
     const isWaitingForFirstToken = !isUser && isLast && isStreaming && blocks.length === 0 && thinkContent.length === 0;
     const isDeepThinkMode = thinkContent.length > 0 || (isWaitingForFirstToken && forceThinkEnabled);
+    const loadingText = isDeepThinkMode ? 'جاري التفكير العميق...' : 'لحظة من فضلك...';
+    const showHeader = isDeepThinkMode || isWaitingForFirstToken;
+
+    const hasContent = blocks.length > 0 || thinkContent.length > 0;
+    const showBody = isUser || hasContent;
 
     const thinkHtmlContent = useMemo(() => {
         if (!thinkContent) return '';
@@ -576,104 +391,68 @@ const MessageItem = React.memo(({
         return fullTextAnswer.length > MAX_COLLAPSED_LENGTH_CHARS || lines > settings.maxCollapseLines;
     }, [fullTextAnswer, isLast, isStreaming, isUser, settings]);
 
+    const collapsedHtmlContent = useMemo(() => {
+        if (shouldCollapse && !isExpanded) {
+            const lines = fullTextAnswer.split('\n');
+            const snippet = lines.slice(0, settings.maxCollapseLines).join('\n').slice(0, MAX_COLLAPSED_LENGTH_CHARS);
+            return marked.parse(snippet + '...') as string;
+        }
+        return '';
+    }, [fullTextAnswer, shouldCollapse, isExpanded, settings]);
+
+    const isProcessing = !isUser && isLast && isStreaming;
+
     return (
-        <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} group animate-fade-in px-2`}>
+        <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} group animate-fade-in px-1`}>
             <div className={`
-                relative transition-all duration-300 flex flex-col min-w-[50px] overflow-hidden
+                relative transition-all duration-500 ease-out flex flex-col min-w-[50px] overflow-hidden max-w-[95%] md:max-w-[85%]
                 ${isUser 
-                    ? 'max-w-[85%] bg-gradient-to-br from-zeus-surface to-gray-900 border border-zeus-gold/30 text-white rounded-2xl rounded-tr-sm p-5 shadow-[0_4px_20px_rgba(255,215,0,0.1)]' 
-                    : `max-w-[90%] bg-black/40 backdrop-blur-sm border border-zeus-gold/20 text-gray-100
+                    ? 'bg-gradient-to-br from-zeus-surface to-gray-900 border border-zeus-gold/20 text-white rounded-2xl rounded-tl-sm p-4 md:p-5' 
+                    : `bg-black/60 border border-zeus-gold/30 text-gray-100 shadow-[0_0_20px_rgba(255,215,0,0.05)]
                        ${isWaitingForFirstToken 
-                            ? 'rounded-full py-3 px-6 items-center justify-center' 
-                            : 'rounded-2xl rounded-tl-sm p-5' 
+                            ? 'rounded-[2rem] py-2 px-5 items-center justify-center' 
+                            : 'rounded-2xl rounded-tr-sm p-4 md:p-5' 
                        }`
                 }
             `}>
-                
-                {/* عنوان التفكير العميق */}
-                {!isUser && isDeepThinkMode && !isWaitingForFirstToken && (
-                    <div 
-                        className="flex items-center gap-3 mb-4 pb-3 border-b border-zeus-gold/20 cursor-pointer hover:bg-white/5 -mx-2 px-2 py-1 rounded-lg transition-colors"
-                        onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
-                    >
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-zeus-gold/20 to-yellow-600/20 border border-zeus-gold/40 flex items-center justify-center flex-shrink-0 shadow-[0_0_15px_rgba(255,215,0,0.2)]">
-                            <i className="fas fa-brain text-zeus-gold text-sm"></i>
-                        </div>
-                        <div className="flex-1">
-                            <span className="text-sm font-bold text-zeus-gold">عملية التفكير العميق</span>
-                        </div>
-                        <i className={`fas fa-chevron-down text-xs text-gray-500 transition-transform ${isThinkingExpanded ? 'rotate-180' : ''}`}></i>
-                    </div>
+                {!isUser && (
+                    <>
+                        {showHeader && (
+                            <div className={`flex items-center gap-3 transition-all duration-300 ${!isProcessing && isDeepThinkMode ? 'cursor-pointer hover:bg-white/5 rounded-lg -mx-2 px-2 py-1' : ''} ${isWaitingForFirstToken ? 'mb-0' : 'mb-3'}`} onClick={() => (!isProcessing && isDeepThinkMode) && setIsThinkingExpanded(!isThinkingExpanded)}>
+                                <div className="relative w-6 h-6 flex items-center justify-center flex-shrink-0">
+                                    {isProcessing && blocks.length === 0 ? (
+                                        <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50"><circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="animate-dash-flow" strokeDasharray="28 6 28 6 28 30" /></svg>
+                                    ) : (
+                                        <div className="w-full h-full rounded-full border-2 border-zeus-gold shadow-[0_0_10px_rgba(255,215,0,0.5)]"></div>
+                                    )}
+                                    <i className="fas fa-bolt text-[10px] text-zeus-gold absolute"></i>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className={`text-sm font-bold transition-all whitespace-nowrap ${isProcessing ? 'text-zeus-gold animate-pulse' : 'text-gray-300'}`}>{isProcessing ? loadingText : (isDeepThinkMode ? 'عرض طريقة التفكير' : '')}</span>
+                                </div>
+                                {!isProcessing && isDeepThinkMode && (<i className={`fas fa-chevron-down text-xs text-gray-500 mr-auto transition-transform duration-300 ${isThinkingExpanded ? 'rotate-180' : ''}`}></i>)}
+                            </div>
+                        )}
+                        {isDeepThinkMode && !isWaitingForFirstToken && (<div className={`h-px w-full bg-zeus-gold/20 mb-4 transition-all duration-500 ${isWaitingForFirstToken ? 'opacity-0' : 'opacity-100'}`}></div>)}
+                        {isDeepThinkMode && isThinkingExpanded && thinkContent && (<div className="mb-4 pl-4 border-r-2 border-zeus-gold/20 animate-slide-up"><div className="markdown-body text-gray-300 leading-relaxed opacity-90" style={{ fontSize: '0.9em' }} dangerouslySetInnerHTML={{ __html: thinkHtmlContent }} /></div>)}
+                    </>
                 )}
 
-                {/* محتوى التفكير */}
-                {!isUser && isDeepThinkMode && isThinkingExpanded && thinkContent && (
-                    <div className="mb-4 p-4 bg-black/30 border border-zeus-gold/10 rounded-xl">
-                        <div 
-                            className="markdown-body text-gray-300 text-sm leading-relaxed opacity-90" 
-                            dangerouslySetInnerHTML={{ __html: thinkHtmlContent }} 
-                        />
-                    </div>
-                )}
+                {isUser && (<div className="text-xs mb-3 opacity-70 flex items-center gap-2 border-b border-white/5 pb-2"><i className="fas fa-user text-blue-400"></i><span className="font-bold text-zeus-goldDim">أنت</span></div>)}
 
-                {/* حالة الانتظار */}
-                {isWaitingForFirstToken && (
-                    <div className="flex items-center gap-3">
-                        <div className="relative w-5 h-5">
-                            <svg className="absolute inset-0 w-full h-full text-zeus-gold" viewBox="0 0 50 50">
-                                <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="animate-dash-flow" strokeDasharray="28 6 28 6 28 30" />
-                            </svg>
-                            <i className="fas fa-bolt text-[8px] text-zeus-gold absolute inset-0 flex items-center justify-center"></i>
-                        </div>
-                        <span className="text-sm font-medium text-zeus-gold animate-pulse">
-                            {isDeepThinkMode ? 'جاري التفكير العميق...' : 'لحظة من فضلك...'}
-                        </span>
-                    </div>
-                )}
-
-                {/* عنوان المستخدم */}
-                {isUser && (
-                    <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/10">
-                        <div className="w-6 h-6 rounded-full bg-blue-500/20 border border-blue-400/30 flex items-center justify-center">
-                            <i className="fas fa-user text-blue-400 text-xs"></i>
-                        </div>
-                        <span className="text-xs font-bold text-zeus-goldDim">أنت</span>
-                    </div>
-                )}
-
-                {/* المرفقات */}
                 {msg.attachments && msg.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-3 mb-4">
+                    <div className="flex flex-wrap gap-3 mb-5 justify-end w-full">
                         {msg.attachments.map((att, i) => (
                             <div key={i} className="animate-scale-up" style={{animationDelay: `${i * 100}ms`}}>
                                 {att.dataType === 'image' ? (
-                                    <div 
-                                        onClick={() => onAttachmentClick(att)} 
-                                        className="relative w-40 h-40 rounded-xl overflow-hidden group/img cursor-pointer border border-white/20 hover:border-zeus-gold/50 shadow-lg transition-all duration-300 hover:scale-105 bg-black/50"
-                                    >
-                                        <img 
-                                            src={`data:${att.mimeType};base64,${att.content}`} 
-                                            className="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110" 
-                                            alt={att.name} 
-                                        />
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover/img:opacity-100 transition-opacity">
-                                            <div className="absolute bottom-2 left-2 right-2">
-                                                <p className="text-white text-xs font-medium truncate" dir="ltr">{att.name}</p>
-                                            </div>
-                                        </div>
+                                    <div onClick={() => onAttachmentClick(att)} className="relative w-32 h-32 md:w-48 md:h-48 rounded-2xl overflow-hidden group/img cursor-pointer border border-white/10 shadow-lg transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_20px_rgba(255,215,0,0.15)] bg-black/50">
+                                        <img src={`data:${att.mimeType};base64,${att.content}`} className="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110" alt={att.name} />
+                                        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/10"><i className="fas fa-image text-[10px] text-zeus-gold"></i></div>
                                     </div>
                                 ) : (
-                                    <div 
-                                        onClick={() => onAttachmentClick(att)} 
-                                        className="group/file cursor-pointer flex items-center gap-3 bg-[#0d0d0d] hover:bg-zeus-gold/5 border border-white/20 hover:border-zeus-gold/40 rounded-xl p-4 transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,215,0,0.1)] min-w-[220px]"
-                                    >
-                                        <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center border border-white/10 group-hover/file:border-zeus-gold/30 group-hover/file:scale-110 transition-all shadow-inner">
-                                            <i className="fas fa-file-code text-2xl text-blue-400 group-hover/file:text-zeus-gold transition-colors"></i>
-                                        </div>
-                                        <div className="flex flex-col min-w-0 flex-1">
-                                            <span className="text-sm font-bold text-gray-200 truncate" dir="ltr">{att.name}</span>
-                                            <span className="text-xs text-gray-500">{(att.size / 1024).toFixed(1)} KB</span>
-                                        </div>
+                                    <div onClick={() => onAttachmentClick(att)} className="group/file cursor-pointer flex items-center gap-3 bg-[#111] hover:bg-zeus-gold/5 border border-white/10 hover:border-zeus-gold/30 rounded-2xl p-3 md:p-4 transition-all duration-300 hover:shadow-[0_0_20px_rgba(255,215,0,0.05)] hover:-translate-y-1 min-w-[200px] md:min-w-[240px] max-w-full">
+                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-gray-800 to-black flex items-center justify-center text-zeus-electric border border-white/5 group-hover/file:border-zeus-gold/20 group-hover/file:scale-110 transition-all duration-300 shadow-inner"><i className="fas fa-file-code text-2xl group-hover/file:text-zeus-gold transition-colors"></i></div>
+                                        <div className="flex flex-col min-w-0 flex-1"><span className="text-sm font-bold text-gray-200 truncate w-full" dir="ltr">{att.name}</span></div>
                                     </div>
                                 )}
                             </div>
@@ -681,94 +460,58 @@ const MessageItem = React.memo(({
                     </div>
                 )}
 
-                {/* محتوى الرسالة */}
-                {!isWaitingForFirstToken && (
-                    <>
-                        {shouldCollapse && !isExpanded ? (
-                            <div 
-                                className="markdown-body leading-relaxed break-words mask-bottom" 
-                                style={{ fontSize: 'var(--message-font-size)' }} 
-                                dangerouslySetInnerHTML={{ __html: marked.parse(fullTextAnswer.slice(0, MAX_COLLAPSED_LENGTH_CHARS) + '...') as string }} 
-                            />
-                        ) : (
-                            blocks.map((block, idx) => {
-                                if (block.type === 'text') {
-                                    return (
-                                        <div 
-                                            key={idx} 
-                                            className="markdown-body leading-relaxed break-words" 
-                                            style={{ fontSize: 'var(--message-font-size)' }} 
-                                            dangerouslySetInnerHTML={{ __html: marked.parse(block.content) as string }} 
-                                        />
-                                    );
-                                } else if (block.type === 'artifact') {
-                                    return (
-                                        <ArtifactCard 
-                                            key={idx} 
-                                            identifier={block.identifier} 
-                                            manager={manager}
-                                            onClick={() => onOpenArtifact(block.identifier)}
-                                            isLatest={isLast && isStreaming && idx === blocks.length - 1}
-                                        />
-                                    );
-                                }
-                                return null;
-                            })
-                        )}
-
-                        {/* زر التوسيع/الطي */}
-                        {shouldCollapse && (
-                            <button 
-                                onClick={() => setIsExpanded(!isExpanded)} 
-                                className="w-full mt-3 py-2.5 text-xs font-bold text-zeus-gold bg-zeus-gold/5 hover:bg-zeus-gold/10 border border-zeus-gold/30 hover:border-zeus-gold/50 rounded-xl transition-all flex items-center justify-center gap-2"
-                            >
-                                {isExpanded ? (
-                                    <>
-                                        <i className="fas fa-chevron-up"></i> 
-                                        طي الرسالة
-                                    </>
-                                ) : (
-                                    <>
-                                        <i className="fas fa-chevron-down"></i> 
-                                        عرض المزيد ({fullTextAnswer.length.toLocaleString()} حرف)
-                                    </>
-                                )}
-                            </button>
-                        )}
-
-                        {/* مؤشر الكتابة */}
-                        {!isUser && isLast && isStreaming && blocks.length > 0 && blocks[blocks.length - 1].type !== 'artifact' && (
-                            <span className="inline-block w-2 h-4 bg-zeus-gold ml-1 animate-pulse"></span>
-                        )}
-                    </>
+                {showBody && (
+                    shouldCollapse && !isExpanded ? (
+                        <div className={`markdown-body leading-relaxed min-w-0 break-words mask-bottom animate-fade-in`} style={{ fontSize: 'var(--message-font-size)' }} dangerouslySetInnerHTML={{ __html: collapsedHtmlContent }} />
+                    ) : (
+                        // نستخدم hydratedBlocks بدلاً من blocks لعرض المحتوى المدمج الكامل
+                        hydratedBlocks.map((block, idx) => {
+                            if (block.type === 'text') {
+                                return (
+                                    <div key={idx} className={`markdown-body leading-relaxed min-w-0 break-words animate-fade-in`} style={{ fontSize: 'var(--message-font-size)' }} dangerouslySetInnerHTML={{ __html: marked.parse(block.content) as string }} />
+                                );
+                            } else if (block.type === 'artifact') {
+                                return (
+                                    <ArtifactCard key={idx} data={block.data} onClick={() => onOpenArtifact(block.data)} isStreaming={isStreaming && idx === blocks.length - 1} isLast={isLast} />
+                                );
+                            }
+                            return null;
+                        })
+                    )
                 )}
 
-                {/* Footer */}
-                {!isWaitingForFirstToken && (
-                    <div className="mt-3 pt-3 border-t border-white/5 flex justify-between items-center">
-                        <span className="text-[10px] text-gray-600 font-mono opacity-0 group-hover:opacity-100 transition-opacity" dir="ltr">
-                            {new Date(msg.timestamp).toLocaleTimeString('ar-SA', { 
-                                hour: '2-digit', 
-                                minute: '2-digit' 
-                            })}
-                        </span>
-                        {fullTextAnswer && (
-                            <button 
-                                onClick={() => navigator.clipboard.writeText(fullTextAnswer)} 
-                                className="text-gray-500 hover:text-zeus-gold transition-colors p-1.5 rounded hover:bg-white/5"
-                                title="نسخ"
-                            >
-                                <i className="fas fa-copy text-xs"></i>
-                            </button>
-                        )}
+                {shouldCollapse && (
+                    <button onClick={() => setIsExpanded(!isExpanded)} className="w-full mt-2 py-2 text-xs font-bold text-zeus-gold bg-zeus-gold/5 hover:bg-zeus-gold/10 border border-zeus-gold/20 rounded-lg transition-all flex items-center justify-center gap-2">
+                        {isExpanded ? (<><i className="fas fa-chevron-up"></i> طي الرسالة</>) : (<><i className="fas fa-chevron-down"></i> إظهار باقي الرسالة ({fullTextAnswer.length.toLocaleString()} حرف)</>)}
+                    </button>
+                )}
+                
+                {!isUser && isLast && isStreaming && blocks.length > 0 && blocks[blocks.length - 1].type !== 'artifact' && (<span className="zeus-cursor-inline"></span>)}
+                
+                {(isUser || hasContent) && (
+                    <div className="mt-2 pt-2 border-t border-white/5 flex justify-between items-center gap-2 select-none">
+                        <span className="text-[9px] md:text-[11px] text-gray-600 font-mono opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity duration-300" dir="ltr">{new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+                        {fullTextAnswer && (<button onClick={() => navigator.clipboard.writeText(fullTextAnswer)} className="text-gray-500 hover:text-zeus-gold transition-colors p-1 opacity-70 hover:opacity-100" title="Copy"><i className="fas fa-copy text-[10px] md:text-xs"></i></button>)}
                     </div>
                 )}
             </div>
         </div>
     );
+}, (prevProps, nextProps) => {
+    return (
+        prevProps.msg.content === nextProps.msg.content &&
+        prevProps.isLast === nextProps.isLast &&
+        prevProps.isStreaming === nextProps.isStreaming &&
+        prevProps.forceThinkEnabled === nextProps.forceThinkEnabled &&
+        prevProps.settings.collapseLongMessages === nextProps.settings.collapseLongMessages &&
+        prevProps.settings.collapseTarget === nextProps.settings.collapseTarget &&
+        prevProps.settings.maxCollapseLines === nextProps.settings.maxCollapseLines &&
+        prevProps.settings.fontSize === nextProps.settings.fontSize &&
+        // مقارنة السجل ضرورية لضمان تحديث البطاقات القديمة عند وصول تعديل جديد
+        JSON.stringify(prevProps.globalRegistry) === JSON.stringify(nextProps.globalRegistry) 
+    );
 });
 
-// --- المكون الرئيسي ---
 const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewChat, onStop, settings }) => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -779,54 +522,70 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [showScrollButton, setShowScrollButton] = useState(false);
-    const [viewingAttachment, setViewingAttachment] = useState<Attachment | null>(null);
     
-    // نظام الـ Artifacts
-    const [artifactsManager] = useState(() => new ArtifactsManager());
-    const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
+    const [viewingAttachment, setViewingAttachment] = useState<Attachment | null>(null);
+
+    const [activeArtifact, setActiveArtifact] = useState<ArtifactData | null>(null);
     const [isArtifactOpen, setIsArtifactOpen] = useState(false);
+    const [isArtifactFullscreen, setIsArtifactFullscreen] = useState(false);
+    
+    // السجل العالمي للملفات: هذا هو "عقل" التعديلات
+    const [artifactRegistry, setArtifactRegistry] = useState<Record<string, string>>({});
 
     const isAtBottomRef = useRef(true);
     const [visibleCount, setVisibleCount] = useState(50);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const prevScrollHeightRef = useRef<number>(0);
 
-    const activeArtifact = activeArtifactId ? artifactsManager.getArtifact(activeArtifactId) : null;
-
-    // التمرير للأسفل
     const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
         if (containerRef.current) {
             containerRef.current.scrollTo({
                 top: containerRef.current.scrollHeight,
-                behavior
+                behavior: behavior
             });
             isAtBottomRef.current = true;
             setShowScrollButton(false);
         }
     };
 
-    // إعادة تعيين عند تغيير المحادثة
+    // إعادة بناء سجل الملفات عند تحميل المحادثة
     useEffect(() => {
         setVisibleCount(50);
         setIsLoadingHistory(false);
         setShowScrollButton(false);
         isAtBottomRef.current = true;
         
-        // إعادة تعيين الـ artifacts
-        artifactsManager.reset();
-        setActiveArtifactId(null);
+        setActiveArtifact(null);
         setIsArtifactOpen(false);
-
-        // إعادة بناء الـ artifacts من تاريخ المحادثة
+        setIsArtifactFullscreen(false);
+        
+        // بناء السجل التراكمي من تاريخ المحادثة
+        const newRegistry: Record<string, string> = {};
         if (chat?.messages) {
-            chat.messages.forEach(msg => {
-                if (msg.role !== 'user') {
-                    parseMessageContent(msg.content, artifactsManager);
+            chat.messages.forEach(m => {
+                if (m.role !== 'user') {
+                    const blocks = parseMessageBlocks(m.content);
+                    blocks.forEach(b => {
+                        if (b.type === 'artifact') {
+                            const { identifier, content, action } = b.data;
+                            if (action === 'diff') {
+                                // تطبيق الدمج على النسخة السابقة
+                                const original = newRegistry[identifier] || '';
+                                newRegistry[identifier] = applyPatch(original, content);
+                            } else {
+                                // استبدال كامل
+                                newRegistry[identifier] = content;
+                            }
+                        }
+                    });
                 }
             });
         }
+        setArtifactRegistry(newRegistry);
 
-        setTimeout(() => scrollToBottom('instant'), 50);
+        setTimeout(() => {
+            scrollToBottom('instant');
+        }, 50); 
     }, [chat?.id]);
 
     useEffect(() => {
@@ -834,6 +593,50 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
             setVisibleCount(prev => prev + 1);
         }
     }, [chat?.messages.length]);
+
+    // مراقبة البث لتحديث السجل والـ Artifact المعروض
+    useEffect(() => {
+        if (isStreaming && chat?.messages.length) {
+            const lastMsg = chat.messages[chat.messages.length - 1];
+            if (lastMsg.role !== 'user') {
+                const blocks = parseMessageBlocks(lastMsg.content);
+                const lastArtifactBlock = [...blocks].reverse().find(b => b.type === 'artifact');
+                
+                if (lastArtifactBlock && lastArtifactBlock.type === 'artifact') {
+                    const { identifier, action, content } = lastArtifactBlock.data;
+                    
+                    // تحديث السجل في الوقت الحقيقي
+                    setArtifactRegistry(prev => {
+                        const original = prev[identifier] || '';
+                        const newContent = action === 'diff' ? applyPatch(original, content) : content;
+                        
+                        // إذا كان هذا الملف مفتوحاً حالياً، نحدث محتواه المعروض
+                        if (activeArtifact && activeArtifact.identifier === identifier) {
+                            setActiveArtifact({ ...lastArtifactBlock.data, content: newContent });
+                        }
+                        
+                        return { ...prev, [identifier]: newContent };
+                    });
+                }
+            }
+        }
+    }, [chat?.messages, isStreaming, activeArtifact]); // أعدنا activeArtifact للتبعية ليحدث العرض
+
+    // دالة فتح الـ Artifact من البطاقة (تأخذ المحتوى من السجل دائماً لضمان أنه الأحدث)
+    const handleOpenArtifact = (data: ArtifactData) => {
+        // نأخذ النسخة الأحدث من السجل، أو نستخدم المحتوى الحالي إذا لم يوجد في السجل بعد (حالة نادرة)
+        const currentContent = artifactRegistry[data.identifier] || data.content;
+        
+        // إذا كان البيانات القادمة هي "تعديل"، نطبقها للتأكد، لكن السجل هو المصدر الأوثق
+        let finalContent = currentContent;
+        if (data.action === 'diff' && !artifactRegistry[data.identifier]) {
+             // حالة احتياطية: إذا لم يكن في السجل، نعتبره ملف جديد مؤقتاً
+             finalContent = data.content;
+        }
+
+        setActiveArtifact({ ...data, content: finalContent });
+        setIsArtifactOpen(true);
+    };
 
     const displayedMessages = useMemo(() => {
         if (!chat) return [];
@@ -843,7 +646,6 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
 
     const hasMoreHistory = chat ? chat.messages.length > visibleCount : false;
 
-    // معالجة التمرير
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
         const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
@@ -870,25 +672,25 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         }
     }, [visibleCount]);
 
-    // التمرير التلقائي أثناء البث
     const lastMessage = displayedMessages[displayedMessages.length - 1];
     const lastMessageContentLength = lastMessage?.content?.length || 0;
 
     useEffect(() => {
         if (chat && chat.messages.length > 0) {
-            if (isStreaming && isAtBottomRef.current) {
-                scrollToBottom('auto');
-            } else if (!isStreaming && isAtBottomRef.current) {
+            if (isStreaming) {
+                if (isAtBottomRef.current) {
+                    scrollToBottom('auto'); 
+                }
+            } else if (isAtBottomRef.current) {
                 scrollToBottom('smooth');
             }
         }
     }, [lastMessageContentLength, isStreaming, displayedMessages.length]);
 
-    // ضبط ارتفاع textarea
     const adjustTextareaHeight = () => {
         const textarea = textareaRef.current;
         if (textarea) {
-            textarea.style.height = 'auto';
+            textarea.style.height = 'auto'; 
             const maxHeight = 200;
             const newHeight = Math.min(textarea.scrollHeight, maxHeight);
             textarea.style.height = `${newHeight}px`;
@@ -900,7 +702,6 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         adjustTextareaHeight();
     }, [inputValue]);
 
-    // إعداد marked
     useEffect(() => {
         const renderer = new marked.Renderer();
         renderer.code = ({ text, lang }) => {
@@ -920,40 +721,31 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                 </div>
             `;
         };
-        renderer.link = ({ href, title, text }) => 
-            `<a href="${href}" title="${title || ''}" target="_blank" rel="noopener noreferrer" class="text-zeus-gold hover:underline">${text}</a>`;
-        marked.setOptions({ renderer, gfm: true, breaks: true });
+        renderer.link = ({ href, title, text }) => `<a href="${href}" title="${title || ''}" target="_blank" rel="noopener noreferrer" class="text-zeus-gold hover:underline">${text}</a>`;
+        marked.setOptions({ renderer: renderer, gfm: true, breaks: true });
     }, []);
 
-    // معالجة الملفات
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files) {
-            const files = Array.from(e.target.files);
+            const files = Array.from(e.target.files) as File[];
             const newAttachments: Attachment[] = [];
             for (const file of files) {
                 const isImage = file.type.startsWith('image/');
                 const content = await readFile(file);
                 newAttachments.push({
-                    name: file.name,
-                    type: file.type,
-                    size: file.size,
-                    content: content as string,
-                    dataType: isImage ? 'image' : 'text',
-                    mimeType: file.type
+                    name: file.name, type: file.type, size: file.size,
+                    content: content as string, dataType: isImage ? 'image' : 'text', mimeType: file.type
                 });
             }
             setAttachments(prev => [...prev, ...newAttachments]);
         }
     };
 
-    const readFile = (file: File): Promise<string> => {
+    const readFile = (file: File) => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
-            if (file.type.startsWith('image/')) {
-                reader.readAsDataURL(file);
-            } else {
-                reader.readAsText(file);
-            }
+            if (file.type.startsWith('image/')) reader.readAsDataURL(file); 
+            else reader.readAsText(file);
             reader.onload = () => {
                 let res = reader.result as string;
                 if (file.type.startsWith('image/')) {
@@ -981,12 +773,12 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const handleSubmit = () => {
         if (!inputValue.trim() && attachments.length === 0) return;
         if (isStreaming) return;
-
+        
         onSendMessage(inputValue, attachments, isThinkingEnabled);
         setInputValue('');
         setTextDirection('rtl');
         setAttachments([]);
-
+        
         if (textareaRef.current) textareaRef.current.style.height = 'auto';
         isAtBottomRef.current = true;
         setTimeout(() => scrollToBottom('smooth'), 100);
@@ -999,129 +791,74 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         }
     };
 
-    const handleOpenArtifact = (identifier: string) => {
-        setActiveArtifactId(identifier);
-        setIsArtifactOpen(true);
-    };
-
-    const handleVersionChange = (versionIndex: number) => {
-        if (activeArtifactId) {
-            artifactsManager.goToVersion(activeArtifactId, versionIndex);
-            setActiveArtifactId(activeArtifactId); // تحديث الحالة
-        }
-    };
-
-    const handleExport = (format: 'copy' | 'download') => {
-        if (!activeArtifact) return;
-
-        if (format === 'download') {
-            const extension = activeArtifact.language === 'python' ? 'py' 
-                : activeArtifact.language === 'javascript' ? 'js'
-                : activeArtifact.language === 'typescript' ? 'ts'
-                : activeArtifact.language === 'html' ? 'html'
-                : 'txt';
-            
-            const filename = activeArtifact.title.includes('.') 
-                ? activeArtifact.title 
-                : `${activeArtifact.title}.${extension}`;
-
-            const blob = new Blob([activeArtifact.content], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(url);
-        }
-    };
-
-    // شاشة البداية
     if (!chat) {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 animate-fade-in">
-                <div className="w-32 h-32 rounded-full border-2 border-zeus-gold bg-gradient-to-br from-black to-gray-900 flex items-center justify-center mb-6 animate-float shadow-[0_0_40px_rgba(255,215,0,0.3)]">
-                    <i className="fas fa-bolt text-6xl text-zeus-gold drop-shadow-[0_0_10px_rgba(255,215,0,0.8)]"></i>
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 opacity-80 animate-fade-in relative">
+                <div className="w-32 h-32 rounded-full border-2 border-zeus-gold bg-black/50 flex items-center justify-center mb-6 animate-float shadow-[0_0_30px_rgba(255,215,0,0.2)]">
+                    <i className="fas fa-bolt text-5xl text-zeus-gold"></i>
                 </div>
-                <h2 className="text-4xl md:text-5xl font-bold mb-4 text-white drop-shadow-lg">
-                    مرحباً بك في عرش زيوس
-                </h2>
-                <p className="text-zeus-gold/80 max-w-lg text-lg mb-8 leading-relaxed">
-                    إله الرعد والحكمة في خدمتك. اختر نموذجاً، أرفق ملفاتك، واسأل عما تشاء.
-                </p>
-                <button 
-                    onClick={onNewChat} 
-                    className="px-10 py-4 bg-gradient-to-r from-zeus-gold to-yellow-500 text-black font-bold text-lg rounded-xl hover:scale-105 transition-all shadow-[0_0_30px_rgba(255,215,0,0.4)] hover:shadow-[0_0_40px_rgba(255,215,0,0.6)] flex items-center gap-3"
-                >
-                    <i className="fas fa-plus"></i>
-                    بدء محادثة جديدة
+                <h2 className="text-3xl md:text-4xl font-bold mb-4 text-white drop-shadow-lg font-sans">مرحباً بك في عرش زيوس</h2>
+                <p className="text-zeus-gold/80 max-w-lg text-base md:text-lg mb-8 leading-relaxed">إله الرعد والحكمة في خدمتك. اختر نموذجاً، أرفق ملفاتك، واسأل عما تشاء.</p>
+                <button onClick={onNewChat} className="mb-8 px-8 py-4 bg-zeus-gold text-black font-bold text-lg rounded-xl hover:bg-yellow-400 hover:scale-105 transition-all shadow-[0_0_20px_rgba(255,215,0,0.4)] flex items-center gap-3">
+                    <i className="fas fa-plus"></i> بدء محادثة جديدة
                 </button>
             </div>
         );
     }
 
     return (
-        <div className="flex-1 flex overflow-hidden md:mx-4 md:mb-4 glass-gold md:rounded-2xl border-0 md:border border-zeus-gold/20 shadow-2xl relative">
-            {/* منطقة المحادثة */}
-            <div className={`flex flex-col h-full transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${isArtifactOpen ? 'w-full md:w-[calc(100%-600px)] lg:w-[calc(100%-700px)]' : 'w-full'}`}>
+        <div className="flex-1 flex overflow-hidden md:mx-4 md:mb-4 glass-gold md:rounded-2xl border-0 md:border border-zeus-gold/20 shadow-none md:shadow-2xl relative">
+            
+            <div className={`flex flex-col h-full transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${isArtifactOpen && !isArtifactFullscreen ? 'w-full md:w-1/2' : 'w-full'}`}>
                 
-                {/* منطقة الرسائل */}
-                <div 
-                    ref={containerRef} 
-                    onScroll={handleScroll} 
-                    className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-6 custom-scrollbar"
-                >
+                <div ref={containerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 md:space-y-8 custom-scrollbar">
                     {isLoadingHistory && (
-                        <div className="flex justify-center py-4">
-                            <div className="w-7 h-7 border-3 border-zeus-gold border-t-transparent rounded-full animate-spin"></div>
+                        <div className="flex justify-center py-2">
+                            <div className="w-6 h-6 border-2 border-zeus-gold border-t-transparent rounded-full animate-spin"></div>
                         </div>
                     )}
-                    
+                    {hasMoreHistory && !isLoadingHistory && (
+                        <div className="text-center py-2 opacity-50 text-xs text-gray-500 cursor-pointer hover:text-zeus-gold" onClick={() => {
+                            const fakeEvent = { currentTarget: containerRef.current } as any;
+                            fakeEvent.currentTarget.scrollTop = 0;
+                            handleScroll(fakeEvent);
+                        }}>
+                            <i className="fas fa-arrow-up mb-1"></i> اسحب للأعلى لتحميل المزيد
+                        </div>
+                    )}
                     {displayedMessages.map((msg, idx) => (
-                        <MessageItem
-                            key={msg.id || idx}
-                            msg={msg}
-                            isLast={idx === displayedMessages.length - 1}
-                            isStreaming={isStreaming}
-                            forceThinkEnabled={isThinkingEnabled}
+                        <MessageItem 
+                            key={msg.id || idx} 
+                            msg={msg} 
+                            isLast={idx === displayedMessages.length - 1} 
+                            isStreaming={isStreaming} 
+                            forceThinkEnabled={isThinkingEnabled} 
                             settings={settings}
                             onAttachmentClick={setViewingAttachment}
                             onOpenArtifact={handleOpenArtifact}
-                            manager={artifactsManager}
+                            globalRegistry={artifactRegistry} // تمرير السجل هنا
                         />
                     ))}
                     <div ref={messagesEndRef} />
                 </div>
 
-                {/* منطقة الإدخال */}
-                <div className="p-4 md:p-5 bg-black/50 backdrop-blur-xl border-t border-zeus-gold/20 relative">
-                    {/* زر العودة للأسفل */}
+                <div className="p-4 bg-black/40 backdrop-blur-md border-t border-zeus-gold/20 z-10 relative">
                     {showScrollButton && (
-                        <button 
-                            onClick={() => scrollToBottom('smooth')} 
-                            className="absolute bottom-full right-6 mb-4 w-12 h-12 bg-black/80 backdrop-blur-md border-2 border-zeus-gold/50 rounded-full flex items-center justify-center text-zeus-gold shadow-[0_0_25px_rgba(255,215,0,0.4)] hover:scale-110 hover:bg-zeus-gold hover:text-black transition-all duration-300 animate-bounce"
-                            title="العودة للأحدث"
-                        >
-                            <i className="fas fa-arrow-down text-lg"></i>
+                        <button onClick={() => scrollToBottom('smooth')} className="absolute bottom-full right-4 md:right-8 mb-4 z-20 w-8 h-8 md:w-12 md:h-12 bg-black/70 backdrop-blur-md border border-zeus-gold/50 rounded-full flex items-center justify-center text-zeus-gold shadow-[0_0_20px_rgba(255,215,0,0.3)] hover:scale-110 hover:bg-zeus-gold hover:text-black transition-all duration-300 animate-bounce group" title="الذهاب للأحدث">
+                            <i className="fas fa-arrow-down text-xs md:text-lg group-hover:animate-pulse"></i>
                         </button>
                     )}
 
-                    {/* المرفقات المعلقة */}
                     {attachments.length > 0 && (
                         <div className="flex gap-2 mb-3 overflow-x-auto pb-2 scrollbar-hide">
                             {attachments.map((att, i) => (
-                                <div 
-                                    key={i} 
-                                    className="relative bg-zeus-surface/50 backdrop-blur-sm border border-zeus-gold/30 rounded-xl p-3 flex items-center gap-3 group min-w-[140px]"
-                                >
-                                    <button 
-                                        onClick={() => setAttachments(attachments.filter((_, idx) => idx !== i))} 
-                                        className="absolute -top-2 -left-2 bg-red-600 hover:bg-red-700 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs transition-all shadow-lg z-10"
-                                    >
+                                <div key={i} className="relative bg-zeus-surface border border-zeus-gold/30 rounded-lg p-2 flex items-center gap-2 group min-w-[120px]">
+                                    <button onClick={() => setAttachments(attachments.filter((_, idx) => idx !== i))} className="absolute -top-2 -left-2 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity z-10 shadow-md">
                                         <i className="fas fa-times"></i>
                                     </button>
-                                    <i className={`fas ${att.dataType === 'image' ? 'fa-image text-purple-400' : 'fa-file-alt text-blue-400'} text-xl`}></i>
+                                    <i className={`fas ${att.dataType === 'image' ? 'fa-image text-purple-400' : 'fa-file-alt text-blue-400'} text-lg`}></i>
                                     <div className="flex flex-col overflow-hidden">
-                                        <span className="text-xs text-white font-medium truncate" dir="ltr">{att.name}</span>
+                                        <span className="text-xs text-white truncate w-full" dir="ltr">{att.name}</span>
                                         <span className="text-[10px] text-gray-400">{(att.size / 1024).toFixed(1)} KB</span>
                                     </div>
                                 </div>
@@ -1129,33 +866,18 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                         </div>
                     )}
 
-                    {/* شريط الإدخال */}
-                    <div className="relative flex items-end bg-black/70 backdrop-blur-sm border-2 border-zeus-gold/30 rounded-2xl shadow-[0_0_20px_rgba(255,215,0,0.08)] transition-all focus-within:shadow-[0_0_25px_rgba(255,215,0,0.15)] focus-within:border-zeus-gold/50 overflow-hidden">
-                        <button 
-                            onClick={() => fileInputRef.current?.click()} 
-                            className="h-14 w-14 text-gray-400 hover:text-zeus-gold hover:bg-white/5 transition-all flex items-center justify-center border-l border-zeus-gold/30"
-                            title="إرفاق ملف"
-                        >
-                            <i className="fas fa-paperclip text-xl"></i>
+                    <div className="relative flex items-end bg-black/60 border border-zeus-gold/30 rounded-2xl shadow-[0_0_15px_rgba(255,215,0,0.05)] transition-all focus-within:shadow-[0_0_20px_rgba(255,215,0,0.1)] overflow-hidden">
+                        <button onClick={() => fileInputRef.current?.click()} className="h-11 w-11 md:h-14 md:w-14 text-gray-400 hover:text-zeus-gold hover:bg-white/5 transition-colors flex-shrink-0 flex items-center justify-center border-l border-zeus-gold/30" title="أرفق ملفاً">
+                            <i className="fas fa-paperclip text-lg md:text-xl"></i>
                         </button>
-                        <input 
-                            type="file" 
-                            multiple 
-                            ref={fileInputRef} 
-                            className="hidden" 
-                            onChange={handleFileSelect}
-                        />
+                        <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleFileSelect}/>
 
                         <button 
                             onClick={() => setIsThinkingEnabled(!isThinkingEnabled)}
-                            className={`h-14 w-14 transition-all flex items-center justify-center border-l border-zeus-gold/30 ${
-                                isThinkingEnabled 
-                                    ? 'text-zeus-gold bg-zeus-gold/15 shadow-inner' 
-                                    : 'text-gray-400 hover:text-zeus-gold hover:bg-white/5'
-                            }`}
-                            title={isThinkingEnabled ? "وضع التفكير العميق مفعّل" : "تفعيل التفكير العميق"}
+                            className={`h-11 w-11 md:h-14 md:w-14 transition-colors flex-shrink-0 flex items-center justify-center border-l border-zeus-gold/30 ${isThinkingEnabled ? 'text-zeus-gold bg-zeus-gold/10' : 'text-gray-400 hover:text-zeus-gold hover:bg-white/5'}`}
+                            title={isThinkingEnabled ? "وضع التفكير العميق مفعل (اضغط للتعطيل)" : "تفعيل التفكير العميق"}
                         >
-                            <i className={`fas fa-brain text-xl ${isThinkingEnabled ? 'animate-pulse' : ''}`}></i>
+                            <i className={`fas fa-brain text-lg md:text-xl ${isThinkingEnabled ? 'animate-pulse' : ''}`}></i>
                         </button>
 
                         <textarea
@@ -1163,58 +885,51 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
                             value={inputValue}
                             onChange={handleInputChange}
                             onKeyDown={handleKeyDown}
-                            placeholder={isThinkingEnabled ? "اسأل بعمق... 🧠" : "اسأل أي شيء..."}
+                            placeholder={isThinkingEnabled ? "اسأل بعمق... (وضع التفكير مفعل)" : "اسأل أي شيء..."}
                             dir={textDirection}
-                            className="flex-1 bg-transparent border-none outline-none text-white resize-none py-4 px-4 placeholder-gray-500 text-base scrollbar-thin"
+                            className="flex-1 bg-transparent border-none outline-none text-white resize-none py-3 px-3 md:py-4 md:px-4 placeholder-gray-500 font-sans text-sm md:text-lg scrollbar-thin"
                             style={{ height: 'auto', maxHeight: '200px', overflowY: 'hidden' }}
                             rows={1}
                         />
 
                         {isStreaming ? (
                             <button 
-                                onClick={onStop}
-                                className="h-14 w-14 transition-all flex items-center justify-center border-r border-zeus-gold/30 text-red-500 hover:bg-red-500/15 hover:text-red-400"
+                                onClick={onStop} // استدعاء دالة الإيقاف
+                                className="h-11 w-11 md:h-14 md:w-14 transition-all duration-300 flex-shrink-0 flex items-center justify-center border-r border-zeus-gold/30 text-red-500 hover:bg-red-500/10 hover:text-red-400"
                                 title="إيقاف التوليد"
                             >
-                                <i className="fas fa-stop text-xl animate-pulse"></i>
+                                <i className="fas fa-stop animate-pulse text-lg md:text-xl"></i>
                             </button>
                         ) : (
                             <button 
-                                onClick={handleSubmit}
-                                disabled={!inputValue.trim() && attachments.length === 0}
-                                className={`h-14 w-14 transition-all flex items-center justify-center border-r border-zeus-gold/30 ${
-                                    (!inputValue.trim() && attachments.length === 0)
-                                        ? 'text-gray-600 cursor-not-allowed'
-                                        : 'text-zeus-gold hover:bg-zeus-gold/15 hover:text-yellow-400 hover:scale-110'
-                                }`}
+                                onClick={handleSubmit} 
+                                disabled={!inputValue.trim() && attachments.length === 0} 
+                                className={`h-11 w-11 md:h-14 md:w-14 transition-all duration-300 flex-shrink-0 flex items-center justify-center border-r border-zeus-gold/30 ${(!inputValue.trim() && attachments.length === 0) ? 'text-gray-600 cursor-not-allowed' : 'text-zeus-gold hover:bg-zeus-gold/10 hover:text-yellow-400'}`}
                             >
-                                <i className="fas fa-paper-plane text-xl"></i>
+                                <i className="fas fa-paper-plane text-lg md:text-xl"></i>
                             </button>
                         )}
                     </div>
-
-                    <div className="text-center mt-2 text-[10px] text-gray-500">
+                    
+                    <div className="text-center mt-2 text-[10px] text-gray-500 font-sans">
                         زيوس قد يخطئ، راجع المعلومات المهمة.
                     </div>
                 </div>
             </div>
 
-            {/* عارض الـ Artifacts */}
-            <ArtifactViewer
-                artifact={activeArtifact}
-                isOpen={isArtifactOpen}
-                onClose={() => setIsArtifactOpen(false)}
-                onVersionChange={handleVersionChange}
-                onExport={handleExport}
+            <ArtifactViewer 
+                artifact={activeArtifact} 
+                isOpen={isArtifactOpen} 
+                isFullscreen={isArtifactFullscreen}
+                onToggleFullscreen={() => setIsArtifactFullscreen(!isArtifactFullscreen)}
+                onClose={() => setIsArtifactOpen(false)} 
             />
 
-            {/* نافذة عرض المرفقات */}
-            <AttachmentModal
-                attachment={viewingAttachment}
-                onClose={() => setViewingAttachment(null)}
+            <AttachmentModal 
+                attachment={viewingAttachment} 
+                onClose={() => setViewingAttachment(null)} 
             />
         </div>
     );
-};
-
+}
 export default ChatWindow;
