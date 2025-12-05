@@ -5,13 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>ChatZEUS</title>
     
+    <!-- PWA Settings -->
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#000000">
     <meta name="background-color" content="#000000">
     
-    <link rel="icon" type="image/png" href="/logo.png">
-    <link rel="apple-touch-icon" href="/logo.png">
+    <!-- Favicon & Icons -->
+    <link rel="icon" type="image/svg+xml" href="/logo.svg">
+    <link rel="apple-touch-icon" href="/logo.svg">
     
+    <!-- iOS Support -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="ChatZEUS">
@@ -100,7 +103,8 @@
             background: #FFD700;
         }
         
-        /* تعديل جذري لإصلاح مشاكل PWA:
+        /* 
+           تعديل جذري لإصلاح مشاكل PWA:
            إزالة position: fixed للسماح للمتصفح بالتحكم في العرض بشكل طبيعي
            مع الحفاظ على منع السحب الزائد.
         */

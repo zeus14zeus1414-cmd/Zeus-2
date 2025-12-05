@@ -383,12 +383,9 @@ const App: React.FC = () => {
                                 <i className="fas fa-bars"></i>
                             </button>
                             <div className="flex items-center gap-2">
-                                {/* تم تعديل هذا الجزء لعرض الصورة بدلاً من الأيقونة */}
-                                <img 
-                                    src="/logo.png" 
-                                    alt="شعار زيوس" 
-                                    className="w-8 h-8 rounded-full border border-zeus-gold animate-pulse-fast object-cover" 
-                                />
+                                <div className="w-8 h-8 rounded-full border border-zeus-gold bg-black flex items-center justify-center text-zeus-gold font-bold animate-pulse-fast">
+                                    <i className="fas fa-bolt"></i>
+                                </div>
                                 <div>
                                     <h1 className="font-bold text-lg text-white">
                                         زيوس <span className="text-xs font-normal text-gray-400">إله الرعد</span>
