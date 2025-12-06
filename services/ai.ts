@@ -32,8 +32,6 @@ Format your response exactly like this:
 [إجابتك النهائية هنا]
 `;
 
-// في ملف ai.js - قم بتحديث ARTIFACTS_SYSTEM_INSTRUCTION بهذا:
-
 export const ARTIFACTS_SYSTEM_INSTRUCTION = `
 ═══════════════════════════════════════════════════════════
 🎨 ARTIFACTS SYSTEM - Professional Implementation
@@ -241,9 +239,6 @@ Remember: Artifacts should be production-ready, complete, and impressive!
 ═══════════════════════════════════════════════════════════
 `;
 
-// باقي الكود يبقى كما هو...
-// فقط استبدل النص القديم للـ ARTIFACTS_SYSTEM_INSTRUCTION
-
 const NO_THINKING_INSTRUCTION = `
 IMPORTANT: Do NOT use <think> tags. 
 Do NOT engage in internal monologue or reasoning output. 
@@ -375,7 +370,9 @@ const streamGemini = async (messages: Message[], settings: Settings, onChunk: (c
             return { role: 'model', parts: [{ text: msg.content }] };
         });
 
-        let systemInstructionText = settings.customPrompt || "";
+        // دمج تعليمات الـ Artifacts مع التعليمات المخصصة
+        let systemInstructionText = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${settings.customPrompt || ""}`;
+        
         const generationConfig: any = {
             temperature: settings.temperature,
             maxOutputTokens: 8192
@@ -456,7 +453,9 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
             return { role: m.role, content };
         });
 
-        let systemContent = settings.customPrompt || "";
+        // دمج تعليمات الـ Artifacts
+        let systemContent = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${settings.customPrompt || ""}`;
+        
         if (settings.thinkingBudget > 0) {
             systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
         } else {
@@ -542,7 +541,9 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
             return { role: m.role, content };
         });
 
-        let systemContent = settings.customPrompt || "";
+        // دمج تعليمات الـ Artifacts
+        let systemContent = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${settings.customPrompt || ""}`;
+        
         if (settings.thinkingBudget > 0) {
             systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
         } else {
