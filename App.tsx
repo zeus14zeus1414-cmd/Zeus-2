@@ -382,7 +382,10 @@ const App: React.FC = () => {
                             >
                                 <i className="fas fa-bars"></i>
                             </button>
-                            <div className="flex items-center gap-2">
+                            <div 
+                                className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none"
+                                onClick={() => setCurrentChatId(null)}
+                            >
                                 <div className="w-8 h-8 rounded-full border border-zeus-gold bg-black flex items-center justify-center text-zeus-gold font-bold animate-pulse-fast">
                                     <i className="fas fa-bolt"></i>
                                 </div>
