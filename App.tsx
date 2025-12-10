@@ -4,6 +4,8 @@ import { streamResponse, generateChatTitle } from './services/ai';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import SettingsModal from './components/SettingsModal';
+import LoginScreen from './components/LoginScreen'; // استيراد شاشة تسجيل الدخول الجديدة
+import LogoutModal from './components/LogoutModal'; // استيراد مودال تسجيل الخروج
 import { DeleteModal, RenameModal, DuplicateModal } from './components/ActionModals';
 
 // استيراد أدوات فايربيس
@@ -52,6 +54,9 @@ const App: React.FC = () => {
     const [isStreaming, setIsStreaming] = useState(false);
     const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
     
+    // حالة مودال تسجيل الخروج
+    const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+    
     const abortControllerRef = useRef<AbortController | null>(null);
 
     const [activeModal, setActiveModal] = useState<'delete' | 'rename' | 'duplicate' | null>(null);
@@ -84,16 +89,17 @@ const App: React.FC = () => {
                 loadedChats[doc.id] = doc.data() as Chat;
             });
             
-            // هنا التحسين: إذا كنا نكتب حالياً، لا تقم باستبدال المحادثة الحالية فوراً لتجنب الوميض
-            // إلا إذا كانت البيانات القادمة أحدث فعلاً وتحتوي على رسائل أكثر
+            // حماية ضد الوميض: نحتفظ بالنسخة المحلية إذا كانت أحدث (بسبب الستريمنج)
             setChats(prev => {
-                // إذا كنا في وضع الستريمنج، نحاول الحفاظ على الحالة المحلية للمحادثة الحالية
-                if (isStreaming && currentChatId && loadedChats[currentChatId]) {
+                if (isStreaming && currentChatId && loadedChats[currentChatId] && prev[currentChatId]) {
                     const serverChat = loadedChats[currentChatId];
                     const localChat = prev[currentChatId];
                     
-                    // إذا كانت النسخة المحلية لديها رسائل أكثر (بسبب الستريمنج)، نحتفظ بها
-                    if (localChat && localChat.messages.length >= serverChat.messages.length) {
+                    // إذا كان لدينا رسائل محلياً أكثر أو نص أطول، نتجاهل تحديث السيرفر القديم مؤقتاً
+                    const localLen = localChat.messages[localChat.messages.length - 1]?.content.length || 0;
+                    const serverLen = serverChat.messages[serverChat.messages.length - 1]?.content.length || 0;
+
+                    if (localChat.messages.length >= serverChat.messages.length && localLen > serverLen) {
                         return { ...loadedChats, [currentChatId]: localChat };
                     }
                 }
@@ -102,7 +108,7 @@ const App: React.FC = () => {
         });
 
         return () => unsubscribe();
-    }, [user, isStreaming, currentChatId]); // أضفنا الاعتماديات
+    }, [user, isStreaming, currentChatId]);
 
     // 3. تحميل الإعدادات
     useEffect(() => {
@@ -181,7 +187,6 @@ const App: React.FC = () => {
             order: Date.now()
         };
         
-        // حفظ فوري
         await createChatInFirebase(newChat);
         setCurrentChatId(id);
         if (window.innerWidth < 768) setIsSidebarOpen(false);
@@ -272,7 +277,6 @@ const App: React.FC = () => {
         }
     };
 
-    // الدالة المعدلة جذرياً لحل مشكلة الاختفاء
     const handleSendMessage = async (content: string, attachments: Attachment[], forceThink: boolean = false) => {
         if ((!content.trim() && attachments.length === 0) || !user) return;
         
@@ -284,7 +288,6 @@ const App: React.FC = () => {
 
         let chatId = currentChatId;
         
-        // 1. إذا كانت محادثة جديدة، ننشئها ونحفظها فوراً
         if (!chatId || !chats[chatId]) {
             chatId = Date.now().toString();
             const newChat: Chat = {
@@ -295,10 +298,8 @@ const App: React.FC = () => {
                 updatedAt: Date.now(),
                 order: Date.now()
             };
-            // تحديث محلي
             setChats(prev => ({ ...prev, [chatId!]: newChat }));
             setCurrentChatId(chatId);
-            // حفظ فوري
             await createChatInFirebase(newChat);
         }
 
@@ -310,25 +311,22 @@ const App: React.FC = () => {
             timestamp: Date.now()
         };
 
-        // 2. نضيف رسالة المستخدم للمصفوفة ونحفظها في السيرفر فوراً
-        // هذا يضمن وجودها قبل أن يأتي أي تحديث للعنوان
+        // إضافة رسالة المستخدم
         let currentChatObj = chats[chatId!] || { messages: [] };
-        let messagesWithUser = [...currentChatObj.messages, userMsg];
+        let updatedMessages = [...currentChatObj.messages, userMsg];
         
-        // تحديث محلي
         setChats(prev => ({
             ...prev,
-            [chatId!]: { ...prev[chatId!], messages: messagesWithUser, updatedAt: Date.now() }
+            [chatId!]: { ...prev[chatId!], messages: updatedMessages, updatedAt: Date.now() }
         }));
 
-        // حفظ في السيرفر فوراً (User Message)
+        // حفظ رسالة المستخدم فوراً
         await updateChatFields(chatId!, { 
-            messages: messagesWithUser, 
+            messages: updatedMessages, 
             updatedAt: Date.now() 
         });
         
-        // توليد العنوان
-        if (messagesWithUser.length === 1 && content.trim()) {
+        if (updatedMessages.length === 1 && content.trim()) {
             generateChatTitle(content, settings)
                 .then(title => {
                     if (title) updateChatTitleAuto(chatId!, title);
@@ -346,20 +344,19 @@ const App: React.FC = () => {
             timestamp: Date.now()
         };
 
-        // 3. نضيف رسالة المساعد الفارغة ونحفظها أيضاً فوراً
-        let messagesWithAssistant = [...messagesWithUser, assistantMsgPlaceholder];
+        let messagesWithAssistant = [...updatedMessages, assistantMsgPlaceholder];
         
         setChats(prev => ({
             ...prev,
             [chatId!]: { ...prev[chatId!], messages: messagesWithAssistant }
         }));
 
-        // حفظ في السيرفر فوراً (Placeholder)
-        // هذا ضروري جداً لتجنب الاختفاء
+        // حفظ الـ Placeholder فوراً
         await updateChatFields(chatId!, { messages: messagesWithAssistant });
 
         try {
             let streamedContent = '';
+            let lastSaveTime = 0; 
             
             const runSettings = {
                 ...settings,
@@ -367,12 +364,12 @@ const App: React.FC = () => {
             };
             
             await streamResponse(
-                messagesWithUser, // نرسل للموديل الرسائل حتى المستخدم فقط
+                updatedMessages, 
                 runSettings, 
                 (chunk) => {
                     streamedContent += chunk;
                     
-                    // تحديث محلي فقط أثناء الستريمنج
+                    // 1. تحديث الواجهة فوراً (سريع)
                     setChats(prev => {
                         const chat = prev[chatId!];
                         if (!chat) return prev;
@@ -384,11 +381,26 @@ const App: React.FC = () => {
                         }
                         return { ...prev, [chatId!]: { ...chat, messages: newMsgs } };
                     });
+
+                    // 2. الحفظ الدوري في السيرفر (كل 3 ثوانٍ)
+                    const now = Date.now();
+                    if (now - lastSaveTime > 3000) { 
+                        lastSaveTime = now;
+                        
+                        const currentMessagesToSave = messagesWithAssistant.map(m => 
+                            m.id === assistantMsgId ? { ...m, content: streamedContent } : m
+                        );
+                        
+                        updateChatFields(chatId!, { 
+                            messages: currentMessagesToSave,
+                            updatedAt: Date.now() 
+                        }).catch(err => console.warn("Background save failed:", err));
+                    }
                 },
                 abortController.signal
             );
 
-            // 4. الحفظ النهائي بعد اكتمال الرد
+            // 3. الحفظ النهائي الأكيد عند الانتهاء
             const finalMessages = messagesWithAssistant.map(m => 
                 m.id === assistantMsgId ? { ...m, content: streamedContent } : m
             );
@@ -402,7 +414,6 @@ const App: React.FC = () => {
             if (error.name !== 'AbortError') {
                 const errorMsg = `\n\n⚠️ خطأ: ${error.message || 'حدث خطأ غير متوقع.'}`;
                 
-                // تحديث الخطأ محلياً
                 setChats(prev => {
                     const chat = prev[chatId!];
                     const newMsgs = [...chat.messages];
@@ -413,7 +424,7 @@ const App: React.FC = () => {
                     return { ...prev, [chatId!]: { ...chat, messages: newMsgs } };
                 });
 
-                // وحفظه في السيرفر أيضاً
+                // حفظ رسالة الخطأ
                 const errorMessages = messagesWithAssistant.map(m => 
                     m.id === assistantMsgId ? { ...m, content: m.content + errorMsg } : m
                 );
@@ -432,37 +443,20 @@ const App: React.FC = () => {
         });
     };
 
+    // معالجة تسجيل الخروج
+    const handleLogoutConfirm = async () => {
+        await logout();
+        setIsLogoutModalOpen(false);
+        setUser(null); // إعادة تعيين حالة المستخدم محلياً لضمان الانتقال السريع لشاشة الدخول
+    };
+
     if (isAuthLoading) {
         return <div className="h-screen w-full bg-black flex items-center justify-center text-zeus-gold">جارٍ التحميل...</div>;
     }
 
     if (!user) {
-        return (
-            <div className="h-screen w-full bg-black flex flex-col items-center justify-center text-white relative overflow-hidden" dir="rtl">
-                <div className="absolute inset-0 bg-zeus-gold/5 animate-pulse"></div>
-                
-                <div className="z-10 bg-zeus-surface p-10 rounded-3xl border border-zeus-gold/20 shadow-[0_0_50px_rgba(255,215,0,0.1)] text-center max-w-md w-full mx-4">
-                    <div className="w-24 h-24 rounded-full bg-black border-2 border-zeus-gold mx-auto mb-6 flex items-center justify-center shadow-[0_0_30px_rgba(255,215,0,0.3)] animate-float">
-                        <i className="fas fa-bolt text-5xl text-zeus-gold"></i>
-                    </div>
-                    
-                    <h1 className="text-3xl font-bold mb-2">مرحباً بك في زيوس</h1>
-                    <p className="text-gray-400 mb-8">سجل الدخول لحفظ محادثاتك والوصول إليها من أي مكان.</p>
-                    
-                    <button 
-                        onClick={signInWithGoogle}
-                        className="w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-all flex items-center justify-center gap-3 shadow-lg"
-                    >
-                        <i className="fab fa-google text-xl"></i>
-                        تسجيل الدخول باستخدام Google
-                    </button>
-
-                    <p className="mt-6 text-xs text-gray-600 font-mono">
-                        Powered by Google Gemini & Firebase
-                    </p>
-                </div>
-            </div>
-        );
+        // تم استبدال الكود القديم بمكون LoginScreen
+        return <LoginScreen onSignIn={signInWithGoogle} />;
     }
 
     return (
@@ -522,14 +516,13 @@ const App: React.FC = () => {
                             </div>
                         </div>
                         <div className="flex items-center gap-3">
-                            {/* معلومات المستخدم */}
                             <div className="flex items-center gap-2 bg-white/5 px-2 py-1 rounded-full border border-white/5">
                                 <img src={user.photoURL || ''} alt="User" className="w-6 h-6 rounded-full" />
                                 <span className="text-xs max-w-[100px] truncate hidden md:block">{user.displayName}</span>
                             </div>
 
                             <button 
-                                onClick={logout}
+                                onClick={() => setIsLogoutModalOpen(true)} // فتح مودال الخروج بدلاً من الخروج المباشر
                                 className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
                                 title="تسجيل الخروج"
                             >
@@ -564,6 +557,13 @@ const App: React.FC = () => {
                     onClose={() => setIsSettingsOpen(false)}
                 />
             )}
+
+            {/* مودال تسجيل الخروج */}
+            <LogoutModal 
+                isOpen={isLogoutModalOpen}
+                onClose={() => setIsLogoutModalOpen(false)}
+                onConfirm={handleLogoutConfirm}
+            />
 
             <DeleteModal 
                 isOpen={activeModal === 'delete'} 
