@@ -42,18 +42,14 @@ const defaultSettings: Settings = {
 };
 
 const App: React.FC = () => {
-    // حالة المستخدم
     const [user, setUser] = useState<User | null>(null);
     const [isAuthLoading, setIsAuthLoading] = useState(true);
-
     const [chats, setChats] = useState<Record<string, Chat>>({});
     const [currentChatId, setCurrentChatId] = useState<string | null>(null);
     const [settings, setSettings] = useState<Settings>(defaultSettings);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
-    
-    // حالة للتحقق من أن الإعدادات تم تحميلها من السحابة لتجنب الكتابة فوقها
     const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
     
     const abortControllerRef = useRef<AbortController | null>(null);
@@ -71,7 +67,7 @@ const App: React.FC = () => {
         return () => unsubscribe();
     }, []);
 
-    // 2. تحميل المحادثات من فايربيس
+    // 2. تحميل المحادثات
     useEffect(() => {
         if (!user) {
             setChats({});
@@ -87,35 +83,44 @@ const App: React.FC = () => {
             snapshot.docs.forEach(doc => {
                 loadedChats[doc.id] = doc.data() as Chat;
             });
-            setChats(loadedChats);
+            
+            // هنا التحسين: إذا كنا نكتب حالياً، لا تقم باستبدال المحادثة الحالية فوراً لتجنب الوميض
+            // إلا إذا كانت البيانات القادمة أحدث فعلاً وتحتوي على رسائل أكثر
+            setChats(prev => {
+                // إذا كنا في وضع الستريمنج، نحاول الحفاظ على الحالة المحلية للمحادثة الحالية
+                if (isStreaming && currentChatId && loadedChats[currentChatId]) {
+                    const serverChat = loadedChats[currentChatId];
+                    const localChat = prev[currentChatId];
+                    
+                    // إذا كانت النسخة المحلية لديها رسائل أكثر (بسبب الستريمنج)، نحتفظ بها
+                    if (localChat && localChat.messages.length >= serverChat.messages.length) {
+                        return { ...loadedChats, [currentChatId]: localChat };
+                    }
+                }
+                return loadedChats;
+            });
         });
 
         return () => unsubscribe();
-    }, [user]);
+    }, [user, isStreaming, currentChatId]); // أضفنا الاعتماديات
 
-    // 3. تحميل الإعدادات من فايربيس (جديد!)
+    // 3. تحميل الإعدادات
     useEffect(() => {
         if (!user) return;
-
-        // مسار الإعدادات: users -> [USER_ID] -> settings -> general
         const settingsRef = doc(db, 'users', user.uid, 'settings', 'general');
-
         const unsubscribe = onSnapshot(settingsRef, (docSnap) => {
             if (docSnap.exists()) {
-                // دمج الإعدادات المحفوظة مع الإعدادات الافتراضية لضمان وجود الحقول الجديدة
                 const savedSettings = docSnap.data() as Settings;
                 setSettings(prev => ({ ...defaultSettings, ...savedSettings }));
             }
             setIsSettingsLoaded(true);
         });
-
         return () => unsubscribe();
     }, [user]);
 
-    // 4. حفظ الإعدادات في فايربيس عند التغيير
+    // 4. حفظ الإعدادات
     useEffect(() => {
-        if (!user || !isSettingsLoaded) return; // لا نحفظ إلا إذا كان المستخدم مسجلاً وتم تحميل الإعدادات الأولية
-
+        if (!user || !isSettingsLoaded) return;
         const handler = setTimeout(async () => {
             try {
                 const settingsRef = doc(db, 'users', user.uid, 'settings', 'general');
@@ -123,26 +128,33 @@ const App: React.FC = () => {
             } catch (e) {
                 console.error("Error saving settings:", e);
             }
-        }, 1000); // حفظ بعد ثانية من التوقف عن الكتابة (Debounce)
-        
+        }, 1000);
         return () => clearTimeout(handler);
     }, [settings, user, isSettingsLoaded]);
 
-    // تطبيق حجم الخط
     useEffect(() => {
         document.documentElement.style.setProperty('--message-font-size', `${settings.fontSize}px`);
     }, [settings.fontSize]);
 
+    // --- دوال فايربيس ---
 
-    // --- دوال التعامل مع فايربيس للمحادثات ---
-
-    const saveChatToFirebase = async (chat: Chat) => {
+    const createChatInFirebase = async (chat: Chat) => {
         if (!user) return;
         try {
             const chatRef = doc(db, 'users', user.uid, 'chats', chat.id);
-            await setDoc(chatRef, chat, { merge: true });
+            await setDoc(chatRef, chat);
         } catch (e) {
-            console.error("Error saving chat:", e);
+            console.error("Error creating chat:", e);
+        }
+    };
+
+    const updateChatFields = async (chatId: string, fields: Partial<Chat>) => {
+        if (!user) return;
+        try {
+            const chatRef = doc(db, 'users', user.uid, 'chats', chatId);
+            await updateDoc(chatRef, fields);
+        } catch (e) {
+            console.error("Error updating chat fields:", e);
         }
     };
 
@@ -155,7 +167,7 @@ const App: React.FC = () => {
         }
     };
 
-    // --- دوال التطبيق الأساسية ---
+    // --- دوال التطبيق ---
 
     const createNewChat = async () => {
         if (!user) return;
@@ -169,8 +181,8 @@ const App: React.FC = () => {
             order: Date.now()
         };
         
-        await saveChatToFirebase(newChat);
-        
+        // حفظ فوري
+        await createChatInFirebase(newChat);
         setCurrentChatId(id);
         if (window.innerWidth < 768) setIsSidebarOpen(false);
     };
@@ -196,13 +208,11 @@ const App: React.FC = () => {
     };
 
     const confirmRenameChat = async (newTitle: string) => {
-        if (modalTargetId && chats[modalTargetId]) {
-            const updatedChat = { 
-                ...chats[modalTargetId], 
+        if (modalTargetId) {
+            await updateChatFields(modalTargetId, { 
                 title: newTitle, 
                 updatedAt: Date.now() 
-            };
-            await saveChatToFirebase(updatedChat);
+            });
             setActiveModal(null);
             setModalTargetId(null);
         }
@@ -244,17 +254,14 @@ const App: React.FC = () => {
                 order: Date.now()
             };
 
-            await saveChatToFirebase(newChat);
+            await createChatInFirebase(newChat);
             setActiveModal(null);
             setModalTargetId(null);
         }
     };
 
     const updateChatTitleAuto = async (id: string, title: string) => {
-        if (chats[id]) {
-            const updatedChat = { ...chats[id], title, updatedAt: Date.now() };
-            await saveChatToFirebase(updatedChat);
-        }
+        await updateChatFields(id, { title });
     };
 
     const handleStopGeneration = () => {
@@ -265,6 +272,7 @@ const App: React.FC = () => {
         }
     };
 
+    // الدالة المعدلة جذرياً لحل مشكلة الاختفاء
     const handleSendMessage = async (content: string, attachments: Attachment[], forceThink: boolean = false) => {
         if ((!content.trim() && attachments.length === 0) || !user) return;
         
@@ -276,6 +284,7 @@ const App: React.FC = () => {
 
         let chatId = currentChatId;
         
+        // 1. إذا كانت محادثة جديدة، ننشئها ونحفظها فوراً
         if (!chatId || !chats[chatId]) {
             chatId = Date.now().toString();
             const newChat: Chat = {
@@ -286,9 +295,11 @@ const App: React.FC = () => {
                 updatedAt: Date.now(),
                 order: Date.now()
             };
-            setChats(prev => ({ ...prev, [chatId!]: newChat })); 
+            // تحديث محلي
+            setChats(prev => ({ ...prev, [chatId!]: newChat }));
             setCurrentChatId(chatId);
-            await saveChatToFirebase(newChat);
+            // حفظ فوري
+            await createChatInFirebase(newChat);
         }
 
         const userMsg: Message = {
@@ -299,15 +310,25 @@ const App: React.FC = () => {
             timestamp: Date.now()
         };
 
+        // 2. نضيف رسالة المستخدم للمصفوفة ونحفظها في السيرفر فوراً
+        // هذا يضمن وجودها قبل أن يأتي أي تحديث للعنوان
         let currentChatObj = chats[chatId!] || { messages: [] };
-        let updatedMessages = [...currentChatObj.messages, userMsg];
+        let messagesWithUser = [...currentChatObj.messages, userMsg];
         
+        // تحديث محلي
         setChats(prev => ({
             ...prev,
-            [chatId!]: { ...prev[chatId!], messages: updatedMessages, updatedAt: Date.now() }
+            [chatId!]: { ...prev[chatId!], messages: messagesWithUser, updatedAt: Date.now() }
         }));
+
+        // حفظ في السيرفر فوراً (User Message)
+        await updateChatFields(chatId!, { 
+            messages: messagesWithUser, 
+            updatedAt: Date.now() 
+        });
         
-        if (updatedMessages.length === 1 && content.trim()) {
+        // توليد العنوان
+        if (messagesWithUser.length === 1 && content.trim()) {
             generateChatTitle(content, settings)
                 .then(title => {
                     if (title) updateChatTitleAuto(chatId!, title);
@@ -325,12 +346,17 @@ const App: React.FC = () => {
             timestamp: Date.now()
         };
 
-        updatedMessages = [...updatedMessages, assistantMsgPlaceholder];
+        // 3. نضيف رسالة المساعد الفارغة ونحفظها أيضاً فوراً
+        let messagesWithAssistant = [...messagesWithUser, assistantMsgPlaceholder];
         
         setChats(prev => ({
             ...prev,
-            [chatId!]: { ...prev[chatId!], messages: updatedMessages }
+            [chatId!]: { ...prev[chatId!], messages: messagesWithAssistant }
         }));
+
+        // حفظ في السيرفر فوراً (Placeholder)
+        // هذا ضروري جداً لتجنب الاختفاء
+        await updateChatFields(chatId!, { messages: messagesWithAssistant });
 
         try {
             let streamedContent = '';
@@ -341,11 +367,12 @@ const App: React.FC = () => {
             };
             
             await streamResponse(
-                updatedMessages.slice(0, -1),
+                messagesWithUser, // نرسل للموديل الرسائل حتى المستخدم فقط
                 runSettings, 
                 (chunk) => {
                     streamedContent += chunk;
                     
+                    // تحديث محلي فقط أثناء الستريمنج
                     setChats(prev => {
                         const chat = prev[chatId!];
                         if (!chat) return prev;
@@ -361,20 +388,21 @@ const App: React.FC = () => {
                 abortController.signal
             );
 
-            const finalChatState = {
-                ...chats[chatId!],
-                id: chatId!,
-                messages: updatedMessages.map(m => 
-                    m.id === assistantMsgId ? { ...m, content: streamedContent } : m
-                ),
+            // 4. الحفظ النهائي بعد اكتمال الرد
+            const finalMessages = messagesWithAssistant.map(m => 
+                m.id === assistantMsgId ? { ...m, content: streamedContent } : m
+            );
+
+            await updateChatFields(chatId!, {
+                messages: finalMessages,
                 updatedAt: Date.now()
-            };
-            
-            await saveChatToFirebase(finalChatState);
+            });
 
         } catch (error: any) {
             if (error.name !== 'AbortError') {
                 const errorMsg = `\n\n⚠️ خطأ: ${error.message || 'حدث خطأ غير متوقع.'}`;
+                
+                // تحديث الخطأ محلياً
                 setChats(prev => {
                     const chat = prev[chatId!];
                     const newMsgs = [...chat.messages];
@@ -384,6 +412,12 @@ const App: React.FC = () => {
                     }
                     return { ...prev, [chatId!]: { ...chat, messages: newMsgs } };
                 });
+
+                // وحفظه في السيرفر أيضاً
+                const errorMessages = messagesWithAssistant.map(m => 
+                    m.id === assistantMsgId ? { ...m, content: m.content + errorMsg } : m
+                );
+                await updateChatFields(chatId!, { messages: errorMessages });
             }
         } finally {
             setIsStreaming(false);
@@ -394,7 +428,7 @@ const App: React.FC = () => {
     const handleReorder = (newChatsOrder: Chat[]) => {
         newChatsOrder.forEach((chat, index) => {
             const newOrder = newChatsOrder.length - index;
-            updateDoc(doc(db, 'users', user!.uid, 'chats', chat.id), { order: newOrder });
+            updateChatFields(chat.id, { order: newOrder });
         });
     };
 
