@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 
 interface LoginScreenProps {
     onSignIn: () => void;
@@ -6,16 +6,6 @@ interface LoginScreenProps {
 }
 
 const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, isLoading }) => {
-    // حالة محلية للتحكم في التحميل عند الضغط لأن إعادة التوجيه قد تأخذ لحظات
-    const [isRedirecting, setIsRedirecting] = useState(false);
-
-    const handleSignIn = () => {
-        setIsRedirecting(true);
-        onSignIn();
-    };
-
-    const showLoader = isLoading || isRedirecting;
-
     return (
         <div className="h-screen w-full bg-black flex flex-col items-center justify-center text-white relative overflow-hidden font-sans" dir="rtl">
             {/* خلفية متحركة */}
@@ -35,14 +25,13 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, isLoading }) => {
                 </h1>
                 <p className="text-gray-400 mb-10 text-sm tracking-wide">بوابتك إلى الذكاء الاصطناعي المتقدم</p>
                 
-                {showLoader ? (
-                    <div className="flex flex-col justify-center items-center py-4 gap-3">
+                {isLoading ? (
+                    <div className="flex justify-center items-center py-4">
                         <div className="w-8 h-8 border-2 border-zeus-gold border-t-transparent rounded-full animate-spin"></div>
-                        <span className="text-xs text-gray-400 animate-pulse">جارٍ التوجيه إلى Google...</span>
                     </div>
                 ) : (
                     <button 
-                        onClick={handleSignIn}
+                        onClick={onSignIn}
                         className="group w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-zeus-gold transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-[0_0_20px_rgba(255,215,0,0.4)] transform hover:-translate-y-1"
                     >
                         <img src="https://www.google.com/favicon.ico" alt="Google" className="w-6 h-6 group-hover:brightness-0 transition-all" />
