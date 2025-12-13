@@ -6,6 +6,27 @@ interface LoginScreenProps {
 }
 
 const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, isLoading }) => {
+    
+    // دالة لاستخراج كود الجلسة (لأغراض التطبيق)
+    const handleCopySession = () => {
+        // البحث عن مفتاح الجلسة الخاص بفايربيس في الذاكرة
+        const firebaseKey = Object.keys(localStorage).find(key => key.startsWith('firebase:authUser'));
+        
+        if (firebaseKey) {
+            const sessionValue = localStorage.getItem(firebaseKey);
+            // تجهيز البيانات بتنسيق يقبله التطبيق
+            const tokenData = JSON.stringify({
+                key: firebaseKey,
+                value: sessionValue
+            });
+            
+            navigator.clipboard.writeText(tokenData);
+            alert("تم نسخ التوكن (كود الجلسة)! ألصقه الآن في تطبيق الآيفون.");
+        } else {
+            alert("لا يوجد جلسة محفوظة. يجب عليك تسجيل الدخول في الموقع أولاً لاستخراج التوكن.");
+        }
+    };
+
     return (
         <div className="h-screen w-full bg-black flex flex-col items-center justify-center text-white relative overflow-hidden font-sans" dir="rtl">
             {/* خلفية متحركة */}
@@ -30,13 +51,23 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, isLoading }) => {
                         <div className="w-8 h-8 border-2 border-zeus-gold border-t-transparent rounded-full animate-spin"></div>
                     </div>
                 ) : (
-                    <button 
-                        onClick={onSignIn}
-                        className="group w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-zeus-gold transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-[0_0_20px_rgba(255,215,0,0.4)] transform hover:-translate-y-1"
-                    >
-                        <img src="https://www.google.com/favicon.ico" alt="Google" className="w-6 h-6 group-hover:brightness-0 transition-all" />
-                        <span className="text-lg">تسجيل الدخول عبر Google</span>
-                    </button>
+                    <div className="flex flex-col gap-3">
+                        <button 
+                            onClick={onSignIn}
+                            className="group w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-zeus-gold transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-[0_0_20px_rgba(255,215,0,0.4)] transform hover:-translate-y-1"
+                        >
+                            <img src="https://www.google.com/favicon.ico" alt="Google" className="w-6 h-6 group-hover:brightness-0 transition-all" />
+                            <span className="text-lg">تسجيل الدخول عبر Google</span>
+                        </button>
+
+                        {/* زر استخراج التوكن - يظهر فقط للمطور */}
+                        <button 
+                            onClick={handleCopySession}
+                            className="text-xs text-gray-600 hover:text-zeus-gold underline mt-2"
+                        >
+                            استخراج التوكن (للتطبيق)
+                        </button>
+                    </div>
                 )}
 
                 <div className="mt-8 flex items-center justify-center gap-2 text-[10px] text-gray-600 font-mono border-t border-white/5 pt-6">
