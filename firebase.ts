@@ -2,12 +2,9 @@ import { initializeApp } from 'firebase/app';
 import { 
     getAuth, 
     GoogleAuthProvider, 
-    signInWithRedirect, 
+    signInWithPopup, 
     signOut, 
-    onAuthStateChanged,
-    setPersistence,
-    browserLocalPersistence,
-    getRedirectResult
+    onAuthStateChanged 
 } from 'firebase/auth';
 import { 
     getFirestore, 
@@ -40,28 +37,13 @@ export const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
 // دالة تسجيل الدخول بجوجل
-// التعديل: إجبار المتصفح على حفظ الجلسة محلياً قبل التوجيه
 export const signInWithGoogle = async () => {
     try {
-        await setPersistence(auth, browserLocalPersistence);
-        await signInWithRedirect(auth, googleProvider);
+        await signInWithPopup(auth, googleProvider);
     } catch (error) {
         console.error("Error signing in", error);
-        alert("فشل بدء عملية تسجيل الدخول.");
+        alert("فشل تسجيل الدخول. هل قمت بتفعيل Google Auth في لوحة التحكم؟");
     }
-};
-
-// دالة لفحص نتيجة العودة من جوجل (مهمة جداً للتطبيقات)
-export const checkRedirect = async () => {
-    try {
-        const result = await getRedirectResult(auth);
-        if (result) {
-            return result.user;
-        }
-    } catch (error) {
-        console.error("Redirect result error:", error);
-    }
-    return null;
 };
 
 // دالة تسجيل الخروج
