@@ -15,6 +15,7 @@ import {
     signInWithGoogle, 
     logout, 
     onAuthStateChanged,
+    checkRedirect, // دالة الفحص الجديدة
     collection,
     doc,
     setDoc,
@@ -63,8 +64,20 @@ const App: React.FC = () => {
     const [modalTargetId, setModalTargetId] = useState<string | null>(null);
     const [modalTargetTitle, setModalTargetTitle] = useState<string>('');
 
-    // 1. مراقبة حالة تسجيل الدخول
+    // 1. مراقبة حالة تسجيل الدخول + فحص العودة من جوجل
     useEffect(() => {
+        const initAuth = async () => {
+            // أولاً: نحاول التقاط المستخدم العائد من Redirect
+            // هذا ضروري جداً في WebViews لأن onAuthStateChanged قد يتأخر
+            const redirectUser = await checkRedirect();
+            if (redirectUser) {
+                setUser(redirectUser);
+                setIsAuthLoading(false);
+            }
+        };
+
+        initAuth();
+
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
             setIsAuthLoading(false);
