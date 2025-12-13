@@ -2,7 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { 
     getAuth, 
     GoogleAuthProvider, 
-    signInWithPopup, 
+    signInWithRedirect, 
     signOut, 
     onAuthStateChanged 
 } from 'firebase/auth';
@@ -36,13 +36,13 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
-// دالة تسجيل الدخول بجوجل
+// دالة تسجيل الدخول بجوجل (تم التعديل لاستخدام Redirect لحل مشاكل التطبيقات الأصلية)
 export const signInWithGoogle = async () => {
     try {
-        await signInWithPopup(auth, googleProvider);
+        await signInWithRedirect(auth, googleProvider);
     } catch (error) {
         console.error("Error signing in", error);
-        alert("فشل تسجيل الدخول. هل قمت بتفعيل Google Auth في لوحة التحكم؟");
+        alert("فشل بدء عملية تسجيل الدخول.");
     }
 };
 
