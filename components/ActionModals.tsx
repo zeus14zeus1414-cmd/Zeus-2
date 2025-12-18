@@ -25,9 +25,9 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({ isOpen, chatTitle, onC
     const [isClosing, setIsClosing] = useState(false);
 
     useEffect(() => {
-        // إعادة تعيين حالة الإغلاق دائماً عند تغيير isOpen
-        // هذا يضمن اختفاء النافذة تماماً عند الإغلاق وعدم الوميض عند الفتح
-        setIsClosing(false);
+        if (isOpen) {
+            setIsClosing(false);
+        }
     }, [isOpen]);
 
     if (!isOpen && !isClosing) return null;
@@ -36,7 +36,7 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({ isOpen, chatTitle, onC
         setIsClosing(true);
         setTimeout(() => {
             onClose();
-            // تمت إزالة setIsClosing(false) من هنا لمنع الوميض
+            setIsClosing(false);
         }, 300);
     };
 
@@ -44,7 +44,7 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({ isOpen, chatTitle, onC
         setIsClosing(true);
         setTimeout(() => {
             onConfirm();
-            // تمت إزالة setIsClosing(false) من هنا لمنع الوميض
+            setIsClosing(false);
         }, 300);
     };
 
@@ -104,8 +104,6 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialTitle, 
             setIsClosing(false);
             setTitle(initialTitle);
             setTimeout(() => inputRef.current?.focus(), 100);
-        } else {
-            setIsClosing(false); // إصلاح ضروري لمنع تجمد الموقع
         }
     }, [isOpen, initialTitle]);
 
@@ -115,6 +113,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialTitle, 
         setIsClosing(true);
         setTimeout(() => {
             onClose();
+            setIsClosing(false);
         }, 300);
     };
 
@@ -124,6 +123,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ isOpen, initialTitle, 
             setIsClosing(true);
             setTimeout(() => {
                 onRename(title.trim());
+                setIsClosing(false);
             }, 300);
         }
     };
@@ -196,8 +196,9 @@ export const DuplicateModal: React.FC<DuplicateModalProps> = ({ isOpen, chatTitl
     const [isClosing, setIsClosing] = useState(false);
 
     useEffect(() => {
-        // إعادة تعيين الحالة دائماً عند التغيير لمنع المشاكل
-        setIsClosing(false);
+        if (isOpen) {
+            setIsClosing(false);
+        }
     }, [isOpen]);
 
     if (!isOpen && !isClosing) return null;
@@ -206,6 +207,7 @@ export const DuplicateModal: React.FC<DuplicateModalProps> = ({ isOpen, chatTitl
         setIsClosing(true);
         setTimeout(() => {
             onClose();
+            setIsClosing(false);
         }, 300);
     };
 
@@ -213,6 +215,7 @@ export const DuplicateModal: React.FC<DuplicateModalProps> = ({ isOpen, chatTitl
         setIsClosing(true);
         setTimeout(() => {
             onConfirm();
+            setIsClosing(false);
         }, 300);
     };
 

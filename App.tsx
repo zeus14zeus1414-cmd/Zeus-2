@@ -4,27 +4,7 @@ import { streamResponse, generateChatTitle } from './services/ai';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import SettingsModal from './components/SettingsModal';
-import LoginScreen from './components/LoginScreen'; // استيراد شاشة تسجيل الدخول الجديدة
-import LogoutModal from './components/LogoutModal'; // استيراد مودال تسجيل الخروج
 import { DeleteModal, RenameModal, DuplicateModal } from './components/ActionModals';
-
-// استيراد أدوات فايربيس
-import { 
-    auth, 
-    db, 
-    signInWithGoogle, 
-    logout, 
-    onAuthStateChanged,
-    collection,
-    doc,
-    setDoc,
-    updateDoc,
-    deleteDoc,
-    onSnapshot,
-    query,
-    orderBy
-} from './firebase';
-import { User } from 'firebase/auth';
 
 const defaultSettings: Settings = {
     provider: 'gemini',
@@ -38,145 +18,55 @@ const defaultSettings: Settings = {
     apiKeyRetryStrategy: 'sequential',
     fontSize: 18,
     thinkingBudget: 1024,
+    // Default Display Settings
     collapseLongMessages: true,
-    collapseTarget: 'user',
+    collapseTarget: 'user', // Default to User only as requested
     maxCollapseLines: 4
 };
 
 const App: React.FC = () => {
-    const [user, setUser] = useState<User | null>(null);
-    const [isAuthLoading, setIsAuthLoading] = useState(true);
     const [chats, setChats] = useState<Record<string, Chat>>({});
     const [currentChatId, setCurrentChatId] = useState<string | null>(null);
     const [settings, setSettings] = useState<Settings>(defaultSettings);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isStreaming, setIsStreaming] = useState(false);
-    const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
     
-    // حالة مودال تسجيل الخروج
-    const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
-    
+    // مرجع للتحكم في إيقاف التوليد
     const abortControllerRef = useRef<AbortController | null>(null);
 
+    // Modal States
     const [activeModal, setActiveModal] = useState<'delete' | 'rename' | 'duplicate' | null>(null);
     const [modalTargetId, setModalTargetId] = useState<string | null>(null);
     const [modalTargetTitle, setModalTargetTitle] = useState<string>('');
-
-    // 1. مراقبة حالة تسجيل الدخول
+    
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-            setUser(currentUser);
-            setIsAuthLoading(false);
-        });
-        return () => unsubscribe();
+        try {
+            const loadedChats = localStorage.getItem('zeusChats');
+            const loadedSettings = localStorage.getItem('zeusSettings');
+            
+            if (loadedChats) setChats(JSON.parse(loadedChats));
+            if (loadedSettings) setSettings({ ...defaultSettings, ...JSON.parse(loadedSettings) });
+        } catch (e) {
+            console.error("فشل في تحميل البيانات", e);
+        }
     }, []);
 
-    // 2. تحميل المحادثات
     useEffect(() => {
-        if (!user) {
-            setChats({});
-            setCurrentChatId(null);
-            return;
-        }
+        const handler = setTimeout(() => {
+            localStorage.setItem('zeusChats', JSON.stringify(chats));
+            localStorage.setItem('zeusSettings', JSON.stringify(settings));
+            if (currentChatId) localStorage.setItem('zeusCurrentChatId', currentChatId);
+        }, 1000); 
 
-        const chatsRef = collection(db, 'users', user.uid, 'chats');
-        const q = query(chatsRef, orderBy('updatedAt', 'desc'));
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const loadedChats: Record<string, Chat> = {};
-            snapshot.docs.forEach(doc => {
-                loadedChats[doc.id] = doc.data() as Chat;
-            });
-            
-            // حماية ضد الوميض: نحتفظ بالنسخة المحلية إذا كانت أحدث (بسبب الستريمنج)
-            setChats(prev => {
-                if (isStreaming && currentChatId && loadedChats[currentChatId] && prev[currentChatId]) {
-                    const serverChat = loadedChats[currentChatId];
-                    const localChat = prev[currentChatId];
-                    
-                    // إذا كان لدينا رسائل محلياً أكثر أو نص أطول، نتجاهل تحديث السيرفر القديم مؤقتاً
-                    const localLen = localChat.messages[localChat.messages.length - 1]?.content.length || 0;
-                    const serverLen = serverChat.messages[serverChat.messages.length - 1]?.content.length || 0;
-
-                    if (localChat.messages.length >= serverChat.messages.length && localLen > serverLen) {
-                        return { ...loadedChats, [currentChatId]: localChat };
-                    }
-                }
-                return loadedChats;
-            });
-        });
-
-        return () => unsubscribe();
-    }, [user, isStreaming, currentChatId]);
-
-    // 3. تحميل الإعدادات
-    useEffect(() => {
-        if (!user) return;
-        const settingsRef = doc(db, 'users', user.uid, 'settings', 'general');
-        const unsubscribe = onSnapshot(settingsRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const savedSettings = docSnap.data() as Settings;
-                setSettings(prev => ({ ...defaultSettings, ...savedSettings }));
-            }
-            setIsSettingsLoaded(true);
-        });
-        return () => unsubscribe();
-    }, [user]);
-
-    // 4. حفظ الإعدادات
-    useEffect(() => {
-        if (!user || !isSettingsLoaded) return;
-        const handler = setTimeout(async () => {
-            try {
-                const settingsRef = doc(db, 'users', user.uid, 'settings', 'general');
-                await setDoc(settingsRef, settings, { merge: true });
-            } catch (e) {
-                console.error("Error saving settings:", e);
-            }
-        }, 1000);
         return () => clearTimeout(handler);
-    }, [settings, user, isSettingsLoaded]);
+    }, [chats, settings, currentChatId]);
 
     useEffect(() => {
         document.documentElement.style.setProperty('--message-font-size', `${settings.fontSize}px`);
     }, [settings.fontSize]);
 
-    // --- دوال فايربيس ---
-
-    const createChatInFirebase = async (chat: Chat) => {
-        if (!user) return;
-        try {
-            const chatRef = doc(db, 'users', user.uid, 'chats', chat.id);
-            await setDoc(chatRef, chat);
-        } catch (e) {
-            console.error("Error creating chat:", e);
-        }
-    };
-
-    const updateChatFields = async (chatId: string, fields: Partial<Chat>) => {
-        if (!user) return;
-        try {
-            const chatRef = doc(db, 'users', user.uid, 'chats', chatId);
-            await updateDoc(chatRef, fields);
-        } catch (e) {
-            console.error("Error updating chat fields:", e);
-        }
-    };
-
-    const deleteChatFromFirebase = async (chatId: string) => {
-        if (!user) return;
-        try {
-            await deleteDoc(doc(db, 'users', user.uid, 'chats', chatId));
-        } catch (e) {
-            console.error("Error deleting chat:", e);
-        }
-    };
-
-    // --- دوال التطبيق ---
-
-    const createNewChat = async () => {
-        if (!user) return;
+    const createNewChat = () => {
         const id = Date.now().toString();
         const newChat: Chat = {
             id,
@@ -186,8 +76,7 @@ const App: React.FC = () => {
             updatedAt: Date.now(),
             order: Date.now()
         };
-        
-        await createChatInFirebase(newChat);
+        setChats(prev => ({ ...prev, [id]: newChat }));
         setCurrentChatId(id);
         if (window.innerWidth < 768) setIsSidebarOpen(false);
     };
@@ -197,9 +86,13 @@ const App: React.FC = () => {
         setActiveModal('delete');
     };
 
-    const confirmDeleteChat = async () => {
+    const confirmDeleteChat = () => {
         if (modalTargetId) {
-            await deleteChatFromFirebase(modalTargetId);
+            setChats(prev => {
+                const next = { ...prev };
+                delete next[modalTargetId];
+                return next;
+            });
             if (currentChatId === modalTargetId) setCurrentChatId(null);
             setActiveModal(null);
             setModalTargetId(null);
@@ -212,12 +105,12 @@ const App: React.FC = () => {
         setActiveModal('rename');
     };
 
-    const confirmRenameChat = async (newTitle: string) => {
+    const confirmRenameChat = (newTitle: string) => {
         if (modalTargetId) {
-            await updateChatFields(modalTargetId, { 
-                title: newTitle, 
-                updatedAt: Date.now() 
-            });
+            setChats(prev => ({
+                ...prev,
+                [modalTargetId]: { ...prev[modalTargetId], title: newTitle, updatedAt: Date.now() }
+            }));
             setActiveModal(null);
             setModalTargetId(null);
         }
@@ -228,12 +121,14 @@ const App: React.FC = () => {
         setActiveModal('duplicate');
     };
 
-    const confirmDuplicateChat = async () => {
+    const confirmDuplicateChat = () => {
         if (modalTargetId && chats[modalTargetId]) {
             const originalChat = chats[modalTargetId];
             const newId = Date.now().toString();
             
+            // Logic to determine new title (Name 2, Name 3, etc.)
             let baseTitle = originalChat.title;
+            // Check if title already ends with a number
             const match = baseTitle.match(/^(.*?)(\d+)$/);
             let namePart = baseTitle;
             let numberPart = 2;
@@ -244,31 +139,42 @@ const App: React.FC = () => {
             }
 
             let newTitle = `${namePart} ${numberPart}`;
+            
+            // Ensure uniqueness loop
             while (Object.values(chats).some((c: Chat) => c.title === newTitle)) {
                 numberPart++;
                 newTitle = `${namePart} ${numberPart}`;
             }
 
+            // Create Deep Copy
             const newChat: Chat = {
                 ...originalChat,
                 id: newId,
                 title: newTitle,
+                // Deep copy messages to ensure independence
                 messages: JSON.parse(JSON.stringify(originalChat.messages)),
                 createdAt: Date.now(),
                 updatedAt: Date.now(),
-                order: Date.now()
+                order: Date.now() // Moves to top
             };
 
-            await createChatInFirebase(newChat);
+            setChats(prev => ({ ...prev, [newId]: newChat }));
             setActiveModal(null);
             setModalTargetId(null);
+            
+            // Optional: Switch to the new chat immediately
+            // setCurrentChatId(newId);
         }
     };
 
-    const updateChatTitleAuto = async (id: string, title: string) => {
-        await updateChatFields(id, { title });
+    const updateChatTitleAuto = (id: string, title: string) => {
+        setChats(prev => ({
+            ...prev,
+            [id]: { ...prev[id], title, updatedAt: Date.now() }
+        }));
     };
 
+    // دالة إيقاف التوليد
     const handleStopGeneration = () => {
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
@@ -278,17 +184,20 @@ const App: React.FC = () => {
     };
 
     const handleSendMessage = async (content: string, attachments: Attachment[], forceThink: boolean = false) => {
-        if ((!content.trim() && attachments.length === 0) || !user) return;
+        if (!content.trim() && attachments.length === 0) return;
         
+        // إلغاء أي طلب سابق إذا وجد
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
         }
+        // إنشاء متحكم جديد
         const abortController = new AbortController();
         abortControllerRef.current = abortController;
 
         let chatId = currentChatId;
-        
-        if (!chatId || !chats[chatId]) {
+        const isNewChat = !chatId || !chats[chatId] || chats[chatId].messages.length === 0;
+
+        if (!chatId) {
             chatId = Date.now().toString();
             const newChat: Chat = {
                 id: chatId,
@@ -300,7 +209,6 @@ const App: React.FC = () => {
             };
             setChats(prev => ({ ...prev, [chatId!]: newChat }));
             setCurrentChatId(chatId);
-            await createChatInFirebase(newChat);
         }
 
         const userMsg: Message = {
@@ -311,22 +219,20 @@ const App: React.FC = () => {
             timestamp: Date.now()
         };
 
-        // إضافة رسالة المستخدم
-        let currentChatObj = chats[chatId!] || { messages: [] };
-        let updatedMessages = [...currentChatObj.messages, userMsg];
-        
-        setChats(prev => ({
-            ...prev,
-            [chatId!]: { ...prev[chatId!], messages: updatedMessages, updatedAt: Date.now() }
-        }));
-
-        // حفظ رسالة المستخدم فوراً
-        await updateChatFields(chatId!, { 
-            messages: updatedMessages, 
-            updatedAt: Date.now() 
+        setChats(prev => {
+            const chat = prev[chatId!];
+            return {
+                ...prev,
+                [chatId!]: {
+                    ...chat,
+                    messages: [...chat.messages, userMsg],
+                    updatedAt: Date.now(),
+                    order: Date.now()
+                }
+            };
         });
-        
-        if (updatedMessages.length === 1 && content.trim()) {
+
+        if (isNewChat && content.trim()) {
             generateChatTitle(content, settings)
                 .then(title => {
                     if (title) updateChatTitleAuto(chatId!, title);
@@ -337,26 +243,31 @@ const App: React.FC = () => {
         setIsStreaming(true);
 
         const assistantMsgId = (Date.now() + 1).toString();
-        const assistantMsgPlaceholder: Message = {
-            id: assistantMsgId,
-            role: 'assistant',
-            content: '', 
-            timestamp: Date.now()
-        };
-
-        let messagesWithAssistant = [...updatedMessages, assistantMsgPlaceholder];
         
-        setChats(prev => ({
-            ...prev,
-            [chatId!]: { ...prev[chatId!], messages: messagesWithAssistant }
-        }));
-
-        // حفظ الـ Placeholder فوراً
-        await updateChatFields(chatId!, { messages: messagesWithAssistant });
+        setChats(prev => {
+            const chat = prev[chatId!];
+            return {
+                ...prev,
+                [chatId!]: {
+                    ...chat,
+                    messages: [
+                        ...chat.messages, 
+                        {
+                            id: assistantMsgId,
+                            role: 'assistant',
+                            content: '', 
+                            timestamp: Date.now()
+                        }
+                    ]
+                }
+            };
+        });
 
         try {
+            const chat = chats[chatId!] || { messages: [] };
+            const history = [...chat.messages, userMsg]; 
+
             let streamedContent = '';
-            let lastSaveTime = 0; 
             
             const runSettings = {
                 ...settings,
@@ -364,71 +275,55 @@ const App: React.FC = () => {
             };
             
             await streamResponse(
-                updatedMessages, 
+                history, 
                 runSettings, 
                 (chunk) => {
                     streamedContent += chunk;
                     
-                    // 1. تحديث الواجهة فوراً (سريع)
                     setChats(prev => {
-                        const chat = prev[chatId!];
-                        if (!chat) return prev;
+                        const currentChat = prev[chatId!];
+                        if (!currentChat) return prev;
                         
-                        const newMsgs = [...chat.messages];
-                        const lastIdx = newMsgs.findIndex(m => m.id === assistantMsgId);
-                        if (lastIdx !== -1) {
-                            newMsgs[lastIdx] = { ...newMsgs[lastIdx], content: streamedContent };
+                        const msgs = [...currentChat.messages];
+                        const lastMsgIndex = msgs.findIndex(m => m.id === assistantMsgId);
+                        
+                        if (lastMsgIndex !== -1) {
+                            msgs[lastMsgIndex] = {
+                                ...msgs[lastMsgIndex],
+                                content: streamedContent
+                            };
                         }
-                        return { ...prev, [chatId!]: { ...chat, messages: newMsgs } };
+                        
+                        return {
+                            ...prev,
+                            [chatId!]: { ...currentChat, messages: msgs }
+                        };
                     });
-
-                    // 2. الحفظ الدوري في السيرفر (كل 3 ثوانٍ)
-                    const now = Date.now();
-                    if (now - lastSaveTime > 3000) { 
-                        lastSaveTime = now;
-                        
-                        const currentMessagesToSave = messagesWithAssistant.map(m => 
-                            m.id === assistantMsgId ? { ...m, content: streamedContent } : m
-                        );
-                        
-                        updateChatFields(chatId!, { 
-                            messages: currentMessagesToSave,
-                            updatedAt: Date.now() 
-                        }).catch(err => console.warn("Background save failed:", err));
-                    }
                 },
-                abortController.signal
+                abortController.signal // تمرير إشارة الإيقاف
             );
-
-            // 3. الحفظ النهائي الأكيد عند الانتهاء
-            const finalMessages = messagesWithAssistant.map(m => 
-                m.id === assistantMsgId ? { ...m, content: streamedContent } : m
-            );
-
-            await updateChatFields(chatId!, {
-                messages: finalMessages,
-                updatedAt: Date.now()
-            });
 
         } catch (error: any) {
-            if (error.name !== 'AbortError') {
-                const errorMsg = `\n\n⚠️ خطأ: ${error.message || 'حدث خطأ غير متوقع.'}`;
-                
+            if (error.name === 'AbortError') {
+                console.log('Generation stopped by user');
+            } else {
                 setChats(prev => {
-                    const chat = prev[chatId!];
-                    const newMsgs = [...chat.messages];
-                    const lastIdx = newMsgs.findIndex(m => m.id === assistantMsgId);
-                    if (lastIdx !== -1) {
-                         newMsgs[lastIdx].content += errorMsg;
+                    const currentChat = prev[chatId!];
+                    const msgs = [...currentChat.messages];
+                    const lastMsgIndex = msgs.findIndex(m => m.id === assistantMsgId);
+                    
+                    if (lastMsgIndex !== -1) {
+                        msgs[lastMsgIndex] = {
+                            ...msgs[lastMsgIndex],
+                            content: msgs[lastMsgIndex].content + `\n\n⚠️ خطأ: ${error.message || 'حدث خطأ غير متوقع.'}`
+                        };
                     }
-                    return { ...prev, [chatId!]: { ...chat, messages: newMsgs } };
-                });
 
-                // حفظ رسالة الخطأ
-                const errorMessages = messagesWithAssistant.map(m => 
-                    m.id === assistantMsgId ? { ...m, content: m.content + errorMsg } : m
-                );
-                await updateChatFields(chatId!, { messages: errorMessages });
+                    return {
+                        ...prev,
+                        [chatId!]: { ...currentChat, messages: msgs }
+                    };
+                });
             }
         } finally {
             setIsStreaming(false);
@@ -437,27 +332,13 @@ const App: React.FC = () => {
     };
 
     const handleReorder = (newChatsOrder: Chat[]) => {
+        const newChatsMap: Record<string, Chat> = {};
         newChatsOrder.forEach((chat, index) => {
-            const newOrder = newChatsOrder.length - index;
-            updateChatFields(chat.id, { order: newOrder });
+            chat.order = newChatsOrder.length - index;
+            newChatsMap[chat.id] = chat;
         });
+        setChats(newChatsMap);
     };
-
-    // معالجة تسجيل الخروج
-    const handleLogoutConfirm = async () => {
-        await logout();
-        setIsLogoutModalOpen(false);
-        setUser(null); // إعادة تعيين حالة المستخدم محلياً لضمان الانتقال السريع لشاشة الدخول
-    };
-
-    if (isAuthLoading) {
-        return <div className="h-screen w-full bg-black flex items-center justify-center text-zeus-gold">جارٍ التحميل...</div>;
-    }
-
-    if (!user) {
-        // تم استبدال الكود القديم بمكون LoginScreen
-        return <LoginScreen onSignIn={signInWithGoogle} />;
-    }
 
     return (
         <div className="relative flex flex-col h-[100dvh] w-full bg-zeus-base text-white font-sans overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]" dir="rtl">
@@ -505,30 +386,20 @@ const App: React.FC = () => {
                                 className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none"
                                 onClick={() => setCurrentChatId(null)}
                             >
-                                <div className="w-8 h-8 rounded-full border border-zeus-gold bg-black flex items-center justify-center text-zeus-gold font-bold">
+                                <div className="w-8 h-8 rounded-full border border-zeus-gold bg-black flex items-center justify-center text-zeus-gold font-bold animate-pulse-fast">
                                     <i className="fas fa-bolt"></i>
                                 </div>
                                 <div>
-                                    <h1 className="font-bold text-lg text-white hidden md:block">
+                                    <h1 className="font-bold text-lg text-white">
                                         زيوس <span className="text-xs font-normal text-gray-400">إله الرعد</span>
                                     </h1>
                                 </div>
                             </div>
                         </div>
                         <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-2 bg-white/5 px-2 py-1 rounded-full border border-white/5">
-                                <img src={user.photoURL || ''} alt="User" className="w-6 h-6 rounded-full" />
-                                <span className="text-xs max-w-[100px] truncate hidden md:block">{user.displayName}</span>
-                            </div>
-
-                            <button 
-                                onClick={() => setIsLogoutModalOpen(true)} // فتح مودال الخروج بدلاً من الخروج المباشر
-                                className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
-                                title="تسجيل الخروج"
-                            >
-                                <i className="fas fa-sign-out-alt"></i>
-                            </button>
-
+                            <span className="hidden md:inline-block text-xs text-zeus-gold bg-zeus-gold/10 px-3 py-1 rounded-full border border-zeus-gold/20">
+                                {settings.model}
+                            </span>
                             <button 
                                 onClick={() => setIsSettingsOpen(true)}
                                 className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
@@ -545,7 +416,7 @@ const App: React.FC = () => {
                         isStreaming={isStreaming}
                         onNewChat={createNewChat} 
                         onStop={handleStopGeneration} 
-                        settings={settings}
+                        settings={settings} // Pass settings to ChatWindow
                     />
                 </div>
             </div>
@@ -557,13 +428,6 @@ const App: React.FC = () => {
                     onClose={() => setIsSettingsOpen(false)}
                 />
             )}
-
-            {/* مودال تسجيل الخروج */}
-            <LogoutModal 
-                isOpen={isLogoutModalOpen}
-                onClose={() => setIsLogoutModalOpen(false)}
-                onConfirm={handleLogoutConfirm}
-            />
 
             <DeleteModal 
                 isOpen={activeModal === 'delete'} 

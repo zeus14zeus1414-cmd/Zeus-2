@@ -9,11 +9,71 @@ interface Props {
     onSendMessage: (text: string, files: Attachment[], forceThink: boolean) => void;
     isStreaming: boolean;
     onNewChat: () => void;
-    onStop?: () => void; // إضافة خاصية الإيقاف
-    settings: Settings; // استقبال الإعدادات
+    onStop?: () => void;
+    settings: Settings;
 }
 
-const MAX_COLLAPSED_LENGTH_CHARS = 350; // Fallback value
+const MAX_COLLAPSED_LENGTH_CHARS = 350;
+
+// --- Suggestion Data Pool ---
+const SUGGESTION_POOL = [
+    {
+        title: "تصميم لعبة برمجة",
+        subtitle: "لتعلم الأساسيات بطريقة ممتعة",
+        prompt: "هل يمكنك مساعدتي في تصميم فكرة لعبة لتعليم مهارات البرمجة الأساسية؟ ابدأ بسؤالي عن لغة البرمجة التي أرغب في التركيز عليها.",
+        icon: "fa-gamepad",
+        color: "text-purple-400"
+    },
+    {
+        title: "خطة وجبات صحية",
+        subtitle: "تنوع غذائي لأسبوع كامل",
+        prompt: "قم بإنشاء خطة وجبات صحية لمدة 7 أيام، مع التركيز على الأطباق الغنية بالبروتين وقليلة الكربوهيدرات. أضف قائمة تسوق بالمكونات.",
+        icon: "fa-carrot",
+        color: "text-green-400"
+    },
+    {
+        title: "شرح مصطلح معقد",
+        subtitle: "تبسيط الفيزياء الكمية",
+        prompt: "اشرح لي مبادئ الفيزياء الكمية وكأنني طفل في العاشرة من عمره. استخدم أمثلة من الحياة اليومية.",
+        icon: "fa-atom",
+        color: "text-blue-400"
+    },
+    {
+        title: "كتابة بريد احترافي",
+        subtitle: "طلب زيادة في الراتب",
+        prompt: "ساعدني في كتابة بريد إلكتروني رسمي ومقنع لمديري أطلب فيه مراجعة راتبي، مع تسليط الضوء على إنجازاتي الأخيرة.",
+        icon: "fa-envelope",
+        color: "text-yellow-400"
+    },
+    {
+        title: "تصحيح كود برمجي",
+        subtitle: "اكتشاف الأخطاء في Python",
+        prompt: "لدي كود Python لا يعمل كما هو متوقع. سأقوم بلصقه لك، وأريدك أن تحلله وتخبرني أين الخطأ وكيف أصلحه.",
+        icon: "fa-bug",
+        color: "text-red-400"
+    },
+    {
+        title: "قصة قصيرة خيالية",
+        subtitle: "عن السفر عبر الزمن",
+        prompt: "اكتب قصة قصيرة مشوقة عن شخص يكتشف ساعة يد قديمة تمكنه من الرجوع بالزمن 5 دقائق فقط إلى الوراء.",
+        icon: "fa-book-open",
+        color: "text-pink-400"
+    },
+    {
+        title: "نصائح للسفر",
+        subtitle: "زيارة اليابان بميزانية محدودة",
+        prompt: "أخطط لزيارة اليابان لمدة أسبوعين. أعطني نصائح لتوفير المال في المواصلات والسكن والطعام دون التضحية بالتجربة.",
+        icon: "fa-plane",
+        color: "text-cyan-400"
+    },
+    {
+        title: "تلخيص كتاب",
+        subtitle: "أهم أفكار العادات الذرية",
+        prompt: "لخص لي النقاط الرئيسية في كتاب 'العادات الذرية' لجيمس كلير، وكيف يمكنني تطبيقها في حياتي العملية.",
+        icon: "fa-list-alt",
+        color: "text-orange-400"
+    }
+];
 
 const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, settings, onAttachmentClick }: { 
     msg: Message, 
@@ -32,43 +92,26 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
         let text = msg.content || '';
         let thinkContent = '';
         
-        // 1. التعامل مع الكتل المكتملة (التي لها بداية ونهاية)
-        // نستخدم تعبير نمطي للبحث عن كل الكتل المغلقة <think>...</think> بغض النظر عن محتواها
         const completeThinkRegex = /<(?:think|فكّر|تفكير)>([\s\S]*?)<\/(?:think|فكّر|تفكير)>/gi;
         
-        // استخراج جميع كتل التفكير المكتملة وتجميعها
         let match;
-        // نستخدم while loop لضمان جمع كل كتل التفكير إذا كان هناك أكثر من واحدة
         while ((match = completeThinkRegex.exec(text)) !== null) {
             thinkContent += (thinkContent ? '\n\n---\n\n' : '') + match[1].trim();
         }
         
-        // حذف الكتل المكتملة من النص الأصلي للحصول على الرد الفعلي المبدئي
         let finalAnswer = text.replace(completeThinkRegex, '').trim();
         
-        // 2. التعامل مع الكتل غير المكتملة (أثناء الـ Streaming)
-        // بما أننا حذفنا الكتل المكتملة، فإن وجود أي وسم فتح متبقي يعني أنه بداية لتفكير لم ينته بعد
         const openTagRegex = /<(?:think|فكّر|تفكير)>/i;
         const openMatch = finalAnswer.match(openTagRegex);
         
         if (openMatch) {
-            // كل ما بعد وسم الفتح هو تفكير جاري
             const pendingThink = finalAnswer.slice(openMatch.index! + openMatch[0].length);
             thinkContent += (thinkContent ? '\n' : '') + pendingThink;
-            
-            // الرد الفعلي هو ما قبل وسم الفتح
             finalAnswer = finalAnswer.slice(0, openMatch.index).trim();
         }
 
-        // تنظيف النتائج
         thinkContent = thinkContent.trim();
         
-        // حالة خاصة: إذا كان الرد فارغاً تماماً ونحن في وضع الستريمنج
-        // قد يكون الموديل قد وضع وسم الفتح للتو، تم التعامل معها أعلاه، لكن للتأكيد
-        if (isLast && isStreaming && !isUser && finalAnswer.length === 0 && thinkContent.length === 0) {
-             // force logic checks outside
-        }
-
         return { thinkContent, finalAnswer };
     }, [msg.content, isLast, isStreaming, isUser]);
 
@@ -85,27 +128,19 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
     const hasContent = finalAnswer.length > 0 || thinkContent.length > 0;
     const showBody = isUser || hasContent;
 
-    // منطق الطي المحسن بناءً على الإعدادات
     const shouldCollapse = useMemo(() => {
-        // إذا كان الطي معطلاً بالكامل
         if (!settings.collapseLongMessages) return false;
-
-        // التحقق من الهدف المحدد للطي
         if (isUser && settings.collapseTarget === 'assistant') return false;
         if (!isUser && settings.collapseTarget === 'user') return false;
-
-        // لا نقوم بالطي أثناء الستريمنج للنموذج لتجنب القفزات المزعجة
         if (isLast && isStreaming && !isUser) return false;
 
         const lines = finalAnswer.split('\n').length;
-        // استخدام القيمة من الإعدادات
         return finalAnswer.length > MAX_COLLAPSED_LENGTH_CHARS || lines > settings.maxCollapseLines;
     }, [finalAnswer, isLast, isStreaming, isUser, settings]);
 
     const htmlContent = useMemo(() => {
         let content = finalAnswer || ' '; 
         if (shouldCollapse && !isExpanded) {
-            // قص المحتوى للعرض المختصر
             const lines = content.split('\n');
             const snippet = lines.slice(0, settings.maxCollapseLines).join('\n').slice(0, MAX_COLLAPSED_LENGTH_CHARS);
             return marked.parse(snippet + '...') as string;
@@ -211,7 +246,6 @@ const MessageItem = React.memo(({ msg, isLast, isStreaming, forceThinkEnabled, s
                                                 <span>عرض</span>
                                             </div>
                                         </div>
-                                        {/* Badge Type */}
                                         <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/10">
                                             <i className="fas fa-image text-[10px] text-zeus-gold"></i>
                                         </div>
@@ -308,25 +342,31 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [showScrollButton, setShowScrollButton] = useState(false);
+    const [activeSuggestions, setActiveSuggestions] = useState<typeof SUGGESTION_POOL>([]);
     
     // State for viewing attachments
     const [viewingAttachment, setViewingAttachment] = useState<Attachment | null>(null);
 
-    // مرجع للتحقق مما إذا كان المستخدم في أسفل الصفحة
     const isAtBottomRef = useRef(true);
 
     const [visibleCount, setVisibleCount] = useState(50);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const prevScrollHeightRef = useRef<number>(0);
 
+    // Randomize suggestions on mount or when chat is null (welcome screen shown)
+    useEffect(() => {
+        if (!chat) {
+            const shuffled = [...SUGGESTION_POOL].sort(() => 0.5 - Math.random());
+            setActiveSuggestions(shuffled.slice(0, 4));
+        }
+    }, [chat]);
+
     const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
         if (containerRef.current) {
-            // نستخدم scrollTo بدلاً من scrollIntoView للتحكم أفضل في السلوك
             containerRef.current.scrollTo({
                 top: containerRef.current.scrollHeight,
                 behavior: behavior
             });
-            // تحديث الحالة يدوياً لأن onScroll قد يتأخر
             isAtBottomRef.current = true;
             setShowScrollButton(false);
         }
@@ -360,11 +400,9 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
         
-        // زيادة حد التسامح قليلاً (100px) لضمان دقة الكشف
         const isAtBottom = distanceFromBottom < 100;
         isAtBottomRef.current = isAtBottom;
         
-        // إظهار زر النزول إذا ابتعدنا كثيراً عن الأسفل
         setShowScrollButton(distanceFromBottom > 300);
 
         if (scrollTop === 0 && hasMoreHistory && !isLoadingHistory) {
@@ -389,17 +427,13 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
     const lastMessage = displayedMessages[displayedMessages.length - 1];
     const lastMessageContentLength = lastMessage?.content?.length || 0;
 
-    // التأثير المسؤول عن التمرير التلقائي أثناء الكتابة أو البث
     useEffect(() => {
         if (chat && chat.messages.length > 0) {
-            // إذا كنا في وضع البث وكان المستخدم في الأسفل، استخدم تمرير فوري (auto/instant)
-            // التمرير الفوري يمنع التذبذب الذي يحدث مع التمرير السلس أثناء التحديثات السريعة
             if (isStreaming) {
                 if (isAtBottomRef.current) {
                     scrollToBottom('auto'); 
                 }
             } else if (isAtBottomRef.current) {
-                // إذا لم يكن بثاً (رسالة جديدة كاملة) وكان المستخدم في الأسفل، استخدم تمرير سلس
                 scrollToBottom('smooth');
             }
         }
@@ -502,6 +536,10 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
         setTimeout(() => scrollToBottom('smooth'), 100);
     };
 
+    const handleSuggestionClick = (prompt: string) => {
+        onSendMessage(prompt, [], false);
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -511,15 +549,83 @@ const ChatWindow: React.FC<Props> = ({ chat, onSendMessage, isStreaming, onNewCh
 
     if (!chat) {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 opacity-80 animate-fade-in relative">
-                <div className="w-32 h-32 rounded-full border-2 border-zeus-gold bg-black/50 flex items-center justify-center mb-6 animate-float shadow-[0_0_30px_rgba(255,215,0,0.2)]">
-                    <i className="fas fa-bolt text-5xl text-zeus-gold"></i>
+            <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden bg-[#050505] selection:bg-zeus-gold/30 w-full min-h-[100dvh] md:min-h-0">
+                {/* Background Gradients */}
+                <div className="absolute top-[-20%] left-1/2 -translate-x-1/2 w-[150vw] h-[100vw] md:w-[800px] md:h-[600px] bg-zeus-gold/5 rounded-full blur-[80px] md:blur-[120px] pointer-events-none animate-pulse"></div>
+                <div className="absolute bottom-[-10%] right-[-10%] w-[80vw] h-[80vw] md:w-[500px] md:h-[500px] bg-cyan-500/5 rounded-full blur-[60px] md:blur-[100px] pointer-events-none"></div>
+
+                <div className="relative z-10 flex flex-col items-center w-full px-4 md:px-6 animate-fade-in max-w-5xl">
+                    
+                    {/* Hero Section */}
+                    <div className="relative mb-6 md:mb-12 group">
+                        <div className="absolute inset-0 bg-zeus-gold/20 rounded-full blur-3xl opacity-50 group-hover:opacity-80 transition-opacity duration-700"></div>
+                        <div className="relative w-28 h-28 md:w-48 md:h-48 rounded-full bg-gradient-to-b from-[#1a1a1a] to-black border border-zeus-gold/20 flex items-center justify-center shadow-[0_0_60px_rgba(255,215,0,0.1)] group-hover:scale-105 transition-all duration-500 group-hover:border-zeus-gold/50 group-hover:shadow-[0_0_80px_rgba(255,215,0,0.2)]">
+                             <div className="absolute inset-4 rounded-full border border-dashed border-white/10 animate-spin-slow"></div>
+                             <div className="absolute inset-0 rounded-full border border-zeus-gold/5 animate-ping opacity-20"></div>
+                             <i className="fas fa-bolt text-5xl md:text-8xl bg-gradient-to-br from-zeus-gold via-yellow-400 to-yellow-700 bg-clip-text text-transparent drop-shadow-2xl filter transform group-hover:rotate-12 transition-transform duration-500"></i>
+                        </div>
+                    </div>
+
+                    {/* Typography */}
+                    <div className="text-center mb-8 md:mb-12 space-y-3 md:space-y-4 px-2">
+                        <h1 className="text-4xl md:text-7xl font-black text-white tracking-tighter">
+                            <span className="bg-clip-text text-transparent bg-gradient-to-r from-white via-gray-100 to-gray-500">ZEUS</span>
+                            <span className="text-zeus-gold ml-2">CHAT</span>
+                        </h1>
+                        <p className="text-gray-400 text-sm md:text-xl font-light max-w-xl md:max-w-2xl mx-auto leading-relaxed">
+                            بوابتك إلى الذكاء الاصطناعي الفائق. <br className="hidden md:block"/>
+                            استخدم قدرات <span className="text-zeus-gold font-medium">Gemini Pro</span> و <span className="text-zeus-electric font-medium">DeepSeek</span> بتجربة عربية متكاملة.
+                        </p>
+                    </div>
+
+                    {/* Primary Action (New Chat) - Hidden on mobile if suggestions are enough, or kept compact */}
+                    <button 
+                        onClick={onNewChat}
+                        className="md:hidden w-full max-w-xs py-3 bg-zeus-gold text-black font-bold rounded-xl mb-6 shadow-lg shadow-zeus-gold/20 active:scale-95 transition-transform"
+                    >
+                        <i className="fas fa-plus-circle mr-2"></i> بدء محادثة جديدة
+                    </button>
+
+                    <button 
+                        onClick={onNewChat}
+                        className="hidden md:block group relative px-10 py-5 bg-zeus-gold text-black font-bold text-xl rounded-2xl hover:bg-yellow-400 transition-all shadow-[0_0_30px_rgba(255,215,0,0.25)] hover:shadow-[0_0_60px_rgba(255,215,0,0.4)] hover:-translate-y-1 mb-16 overflow-hidden min-w-[280px]"
+                    >
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-in-out"></div>
+                        <span className="relative flex items-center justify-center gap-3">
+                            <i className="fas fa-plus-circle text-2xl"></i>
+                            <span>بدء محادثة جديدة</span>
+                        </span>
+                    </button>
+
+                    {/* Capabilities Grid (Suggestions) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 w-full max-w-5xl px-2 md:px-0">
+                        {activeSuggestions.map((item, idx) => (
+                            <button 
+                                key={idx} 
+                                onClick={() => handleSuggestionClick(item.prompt)}
+                                className="group/card text-right w-full p-4 md:p-5 rounded-xl md:rounded-2xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.07] hover:border-zeus-gold/20 transition-all duration-300 backdrop-blur-sm hover:-translate-y-1 flex items-center md:items-start gap-4 md:gap-0 md:flex-col active:scale-[0.98]"
+                            >
+                                <div className={`w-10 h-10 md:w-12 md:h-12 rounded-lg md:rounded-xl bg-black/50 flex flex-shrink-0 items-center justify-center md:mb-4 ${item.color} group-hover/card:scale-110 transition-transform shadow-inner border border-white/5`}>
+                                    <i className={`fas ${item.icon} text-lg md:text-xl`}></i>
+                                </div>
+                                <div className="flex flex-col flex-1 min-w-0">
+                                    <h3 className="text-gray-200 font-bold text-sm md:text-base mb-0.5 md:mb-1 group-hover/card:text-zeus-gold transition-colors truncate w-full">{item.title}</h3>
+                                    <p className="text-gray-500 text-[10px] md:text-xs leading-tight line-clamp-2 md:line-clamp-3">{item.subtitle}</p>
+                                </div>
+                                <i className="fas fa-chevron-left text-gray-700 md:hidden"></i>
+                            </button>
+                        ))}
+                    </div>
                 </div>
-                <h2 className="text-3xl md:text-4xl font-bold mb-4 text-white drop-shadow-lg font-sans">مرحباً بك في عرش زيوس</h2>
-                <p className="text-zeus-gold/80 max-w-lg text-base md:text-lg mb-8 leading-relaxed">إله الرعد والحكمة في خدمتك. اختر نموذجاً، أرفق ملفاتك، واسأل عما تشاء.</p>
-                <button onClick={onNewChat} className="mb-8 px-8 py-4 bg-zeus-gold text-black font-bold text-lg rounded-xl hover:bg-yellow-400 hover:scale-105 transition-all shadow-[0_0_20px_rgba(255,215,0,0.4)] flex items-center gap-3">
-                    <i className="fas fa-plus"></i> بدء محادثة جديدة
-                </button>
+                
+                {/* Version Badge */}
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 py-1 px-3 rounded-full bg-white/5 border border-white/5 text-[10px] text-gray-500 font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                    <span className="hidden md:inline">System Operational</span>
+                    <span className="md:hidden">v2.1</span>
+                    <span className="opacity-50 hidden md:inline">|</span>
+                    <span className="hidden md:inline">v2.1.0</span>
+                </div>
             </div>
         );
     }

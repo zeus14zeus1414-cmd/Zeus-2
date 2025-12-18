@@ -32,213 +32,6 @@ Format your response exactly like this:
 [إجابتك النهائية هنا]
 `;
 
-export const ARTIFACTS_SYSTEM_INSTRUCTION = `
-═══════════════════════════════════════════════════════════
-🎨 ARTIFACTS SYSTEM - Professional Implementation
-═══════════════════════════════════════════════════════════
-
-You have access to a powerful "Artifacts" system for creating self-contained, reusable content.
-
-## 📌 WHEN TO USE ARTIFACTS
-
-✅ USE artifacts for:
-- Complete code files (HTML, React, Python, etc.) > 15 lines
-- Interactive components or applications
-- Substantial documents or visualizations
-- SVG graphics or Mermaid diagrams
-- When user explicitly asks for "create a file" or "make an artifact"
-
-❌ DO NOT use artifacts for:
-- Short code snippets (< 15 lines)
-- Simple examples or explanations
-- Terminal commands
-- Inline code in conversation
-
-## 🔧 ARTIFACT SYNTAX
-
-Wrap content in these XML tags:
-
-<antArtifact identifier="unique-id" type="mime-type" title="Title" action="action-type">
-... content goes here ...
-</antArtifact>
-
-### Required Attributes:
-
-1. **identifier**: Unique slug (e.g., "weather-app-v1")
-   - Use kebab-case
-   - Keep it descriptive
-   - IMPORTANT: When updating an existing artifact, USE THE SAME identifier
-
-2. **type**: MIME type of content
-   - "text/html" - HTML pages
-   - "application/vnd.ant.react" - React components
-   - "application/x-python" - Python scripts
-   - "image/svg+xml" - SVG graphics
-   - "application/vnd.ant.mermaid" - Mermaid diagrams
-   - "text/markdown" - Markdown documents
-
-3. **title**: Display name (e.g., "Weather Dashboard")
-
-4. **action**: Operation type
-   - "create" - New artifact (first time)
-   - "update" - Complete rewrite of existing
-   - "diff" - Partial update (preferred for modifications)
-
-## 🎯 CREATING NEW ARTIFACTS
-
-For a new artifact, use action="create":
-
-<antArtifact identifier="hello-world" type="text/html" title="Hello World" action="create">
-<!DOCTYPE html>
-<html>
-<head><title>Hello</title></head>
-<body><h1>Hello World!</h1></body>
-</html>
-</antArtifact>
-
-## ✏️ UPDATING ARTIFACTS (DIFF METHOD)
-
-For modifications, use action="diff" with the SAME identifier:
-
-<antArtifact identifier="hello-world" type="text/html" title="Hello World" action="diff">
-<<<<
-<h1>Hello World!</h1>
-====
-<h1>Hello Beautiful World! 🌍</h1>
->>>>
-</antArtifact>
-
-### Diff Block Syntax:
-<<<<
-[Exact text to find]
-====
-[New text to replace with]
->>>>
-
-You can include multiple diff blocks in one artifact.
-
-## 🔄 COMPLETE REWRITE
-
-If changes are extensive, use action="update":
-
-<antArtifact identifier="hello-world" type="text/html" title="Hello World Enhanced" action="update">
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Enhanced Hello</title>
-  <style>body { background: linear-gradient(135deg, #667eea, #764ba2); }</style>
-</head>
-<body><h1>Complete New Version!</h1></body>
-</html>
-</antArtifact>
-
-## ⚛️ REACT COMPONENTS
-
-For React components:
-- Use type="application/vnd.ant.react"
-- Export a default component
-- No required props (or provide defaults)
-- Use Tailwind CSS utility classes only
-
-Example:
-
-<antArtifact identifier="counter" type="application/vnd.ant.react" title="Counter" action="create">
-import { useState } from 'react';
-
-export default function Counter() {
-  const [count, setCount] = useState(0);
-  
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900">
-      <h1 className="text-6xl font-bold text-white mb-8">{count}</h1>
-      <div className="flex gap-4">
-        <button
-          onClick={() => setCount(count - 1)}
-          className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
-        >
-          Decrease
-        </button>
-        <button
-          onClick={() => setCount(count + 1)}
-          className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-        >
-          Increase
-        </button>
-      </div>
-    </div>
-  );
-}
-</antArtifact>
-
-## 📊 MERMAID DIAGRAMS
-
-<antArtifact identifier="flow" type="application/vnd.ant.mermaid" title="Process Flow" action="create">
-graph TD
-  A[Start] --> B{Decision}
-  B -->|Yes| C[Process]
-  B -->|No| D[End]
-  C --> D
-</antArtifact>
-
-## 🎨 SVG GRAPHICS
-
-<antArtifact identifier="logo" type="image/svg+xml" title="Logo" action="create">
-<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="100" cy="100" r="80" fill="#FFD700" />
-  <text x="100" y="110" text-anchor="middle" font-size="48" fill="#000">⚡</text>
-</svg>
-</antArtifact>
-
-## 🚨 CRITICAL RULES
-
-1. **Content Only**: Inside tags, include ONLY the actual content
-   - NO markdown code blocks (\`\`\`)
-   - NO explanations or comments
-   - NO preambles or descriptions
-
-2. **Explanations Outside**: Put explanations BEFORE or AFTER the artifact, never inside
-
-3. **Exact Matching**: For diff operations, the "old text" must match EXACTLY
-   - Including whitespace and indentation
-   - Case-sensitive
-   - Character-for-character match
-
-4. **Identifier Consistency**: When updating, always use the same identifier
-
-5. **Single Artifact**: Create only ONE artifact per response (unless explicitly requested)
-
-## 💡 BEST PRACTICES
-
-✨ **DO**:
-- Create complete, functional code
-- Use descriptive identifiers and titles
-- Prefer "diff" for small changes
-- Test your diff patterns mentally
-- Make artifacts self-contained
-
-⚠️ **DON'T**:
-- Mix content types in one artifact
-- Create artifacts for trivial examples
-- Forget to match identifiers when updating
-- Include incomplete or placeholder code
-- Reference external files that won't be available
-
-## 🎯 EXAMPLE WORKFLOW
-
-1. User: "Create a todo list app"
-   → You: Create artifact with action="create"
-
-2. User: "Add a delete button to each item"
-   → You: Update with action="diff", same identifier
-
-3. User: "Change the color scheme completely"
-   → You: Update with action="update", same identifier
-
-═══════════════════════════════════════════════════════════
-Remember: Artifacts should be production-ready, complete, and impressive!
-═══════════════════════════════════════════════════════════
-`;
-
 const NO_THINKING_INSTRUCTION = `
 IMPORTANT: Do NOT use <think> tags. 
 Do NOT engage in internal monologue or reasoning output. 
@@ -370,9 +163,7 @@ const streamGemini = async (messages: Message[], settings: Settings, onChunk: (c
             return { role: 'model', parts: [{ text: msg.content }] };
         });
 
-        // دمج تعليمات الـ Artifacts مع التعليمات المخصصة
-        let systemInstructionText = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${settings.customPrompt || ""}`;
-        
+        let systemInstructionText = settings.customPrompt || "";
         const generationConfig: any = {
             temperature: settings.temperature,
             maxOutputTokens: 8192
@@ -453,9 +244,7 @@ const streamOpenRouter = async (messages: Message[], settings: Settings, onChunk
             return { role: m.role, content };
         });
 
-        // دمج تعليمات الـ Artifacts
-        let systemContent = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${settings.customPrompt || ""}`;
-        
+        let systemContent = settings.customPrompt || "";
         if (settings.thinkingBudget > 0) {
             systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
         } else {
@@ -541,9 +330,7 @@ const streamCustom = async (messages: Message[], settings: Settings, provider: a
             return { role: m.role, content };
         });
 
-        // دمج تعليمات الـ Artifacts
-        let systemContent = `${ARTIFACTS_SYSTEM_INSTRUCTION}\n\n${settings.customPrompt || ""}`;
-        
+        let systemContent = settings.customPrompt || "";
         if (settings.thinkingBudget > 0) {
             systemContent = `${THINKING_SYSTEM_INSTRUCTION}\n\n${systemContent}`;
         } else {
